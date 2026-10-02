@@ -1,88 +1,94 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Column, Float, Integer, String, JSON
-from sqlalchemy.orm import DeclarativeBase
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import JSON, Float, Integer, String
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column
 
-
-# ---------------------------------------------------------------------------
-# SQLAlchemy: таблиці бази даних
-# ---------------------------------------------------------------------------
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 
 class Appliance(Base):
-    """Побутовий прилад."""
     __tablename__ = "appliances"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    power_w = Column(Float, nullable=False)          # потужність, Вт
-    hours = Column(JSON, nullable=False, default=list)  # години роботи, напр. [7, 8, 19, 20]
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    power_watts: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    work_minutes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cycle_minutes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    active_hours: Mapped[List[int]] = mapped_column(JSON, nullable=False, default=list)
 
 
-class SolarStation(Base):
-    """Сонячні панелі."""
-    __tablename__ = "solar_stations"
+class HouseSettings(Base):
+    __tablename__ = "house_settings"
 
-    id = Column(Integer, primary_key=True, index=True)
-    peak_power_w = Column(Float, nullable=False)     # пікова потужність, Вт
-
-
-class Battery(Base):
-    """Акумулятор / EcoFlow."""
-    __tablename__ = "batteries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    capacity_wh = Column(Float, nullable=False)      # ємність, Вт·год
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    grid_limit_watts: Mapped[float] = mapped_column(Float, nullable=False)
+    battery_capacity_wh: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    voltage: Mapped[float] = mapped_column(Float, nullable=False, default=230)
+    breaker_amps: Mapped[float] = mapped_column(Float, nullable=False, default=16)
+    price_day: Mapped[float] = mapped_column(Float, nullable=False, default=4.32)
+    price_night: Mapped[float] = mapped_column(Float, nullable=False, default=2.16)
+    night_start: Mapped[int] = mapped_column(Integer, nullable=False, default=23)
+    night_end: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
 
 
-# ---------------------------------------------------------------------------
-# Pydantic: схеми для даних від фронтенду
-# ---------------------------------------------------------------------------
-class ApplianceSchema(BaseModel):
+class ApplianceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    power_w: float = Field(..., ge=0, description="Потужність приладу, Вт")
-    hours: List[int] = Field(default_factory=list, description="Години роботи (0-23)")
+    power_watts: float = Field(..., ge=0)
+    quantity: int = Field(1, ge=1)
+    work_minutes: Optional[float] = Field(None, ge=0)
+    cycle_minutes: Optional[float] = Field(None, ge=0)
+    active_hours: List[int] = Field(default_factory=list)
 
-    @field_validator("hours")
+    @field_validator("active_hours", mode="before")
     @classmethod
-    def validate_hours(cls, value: List[int]) -> List[int]:
-        for h in value:
-            if h < 0 or h > 23:
-                raise ValueError("Година має бути в діапазоні 0-23")
-        return sorted(set(value))
-
-    model_config = {"from_attributes": True}
-
-
-class SolarSchema(BaseModel):
-    peak_power_w: float = Field(0, ge=0, description="Пікова потужність панелей, Вт")
-
-    model_config = {"from_attributes": True}
+    def validate_active_hours(cls, value: Any) -> List[int]:
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("active_hours має бути списком цілих чисел")
+        for hour in value:
+            if isinstance(hour, bool) or not isinstance(hour, int):
+                raise ValueError("Кожна година має бути цілим числом")
+            if not 0 <= hour <= 23:
+                raise ValueError("Кожна година має бути в діапазоні від 0 до 23")
+        return list(value)
 
 
-class BatterySchema(BaseModel):
-    capacity_wh: float = Field(0, ge=0, description="Ємність акумулятора, Вт·год")
-    initial_charge_wh: Optional[float] = Field(
-        None, ge=0, description="Початковий заряд, Вт·год (за замовчуванням 0)"
-    )
+class ApplianceCreate(ApplianceBase):
+    pass
 
-    model_config = {"from_attributes": True}
+
+class ApplianceResponse(ApplianceBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HouseSettingsBase(BaseModel):
+    grid_limit_watts: float = Field(..., ge=0)
+    battery_capacity_wh: float = Field(0, ge=0)
+    voltage: float = Field(230, gt=0)
+    breaker_amps: float = Field(16, gt=0)
+    price_day: float = Field(4.32, ge=0)
+    price_night: float = Field(2.16, ge=0)
+    night_start: int = Field(23, ge=0, le=23)
+    night_end: int = Field(7, ge=0, le=23)
+
+
+class HouseSettingsCreate(HouseSettingsBase):
+    pass
+
+
+class HouseSettingsResponse(HouseSettingsBase):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SimulationRequest(BaseModel):
-    """Повна конфігурація будинку, яку надсилає фронтенд."""
-    appliances: List[ApplianceSchema] = Field(default_factory=list)
-    solar: SolarSchema = Field(default_factory=SolarSchema)
-    battery: BatterySchema = Field(default_factory=BatterySchema)
-    tariff_day: float = Field(4.32, ge=0, description="Денний тариф, грн/кВт·год")
-
-
-class SimulationResponse(BaseModel):
-    consumption: List[float]
-    solar_generation: List[float]
-    battery_level: List[float]
-    grid_usage: List[float]
-    total_cost: float
+    """Те, що надсилає фронтенд: налаштування будинку + прилади."""
+    voltage: float = Field(230, gt=0)
+    breaker_amps: float = Field(16, gt=0)
+    price_day: float = Field(4.32, ge=0)
+    price_night: float = Field(2.16, ge=0)
+    night_start: int = Field(23, ge=0, le=23)
+    night_end: int = Field(7, ge=0, le=23)
+    appliances: List[ApplianceCreate] = Field(default_factory=list)

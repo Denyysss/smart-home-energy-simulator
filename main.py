@@ -6,24 +6,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from calculator import calculate_daily_balance
-from models import (
-    Appliance,
-    Base,
-    Battery,
-    SimulationRequest,
-    SimulationResponse,
-    SolarStation,
-)
+from calculator import calculate_day
+from models import Appliance, Base, HouseSettings, SimulationRequest
 
-# ---------------------------------------------------------------------------
-# База даних (SQLite через SQLAlchemy)
-# ---------------------------------------------------------------------------
-DATABASE_URL = "sqlite:///./energy.db"
-
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine("sqlite:///./energy.db", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
 Base.metadata.create_all(bind=engine)
 
 
@@ -35,17 +22,9 @@ def get_db():
         db.close()
 
 
-# ---------------------------------------------------------------------------
-# FastAPI + CORS
-# ---------------------------------------------------------------------------
-app = FastAPI(title="Симулятор енергонезалежності будинку", version="0.1.0")
-
+app = FastAPI(title="Симулятор споживання електроенергії")
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # для MVP; у продакшені вкажіть конкретні домени
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,40 +32,85 @@ BASE_DIR = Path(__file__).resolve().parent
 
 @app.get("/", include_in_schema=False)
 def index():
-    """Віддає фронтенд, щоб усе працювало з одного адреса."""
     return FileResponse(BASE_DIR / "index.html")
 
 
-def save_configuration(db: Session, data: SimulationRequest) -> None:
-    """Зберігає останню конфігурацію будинку в БД (попередню замінює)."""
+def save_config(db: Session, req: SimulationRequest, limit: float) -> None:
+    """Зберігає останню конфігурацію (попередню замінює)."""
     db.query(Appliance).delete()
-    db.query(SolarStation).delete()
-    db.query(Battery).delete()
+    db.query(HouseSettings).delete()
 
-    for item in data.appliances:
-        db.add(Appliance(name=item.name, power_w=item.power_w, hours=item.hours))
-    db.add(SolarStation(peak_power_w=data.solar.peak_power_w))
-    db.add(Battery(capacity_wh=data.battery.capacity_wh))
+    seen: dict[str, int] = {}
+    for a in req.appliances:
+        seen[a.name] = seen.get(a.name, 0) + 1
+        name = a.name if seen[a.name] == 1 else f"{a.name} ({seen[a.name]})"  # name унікальне
+        db.add(
+            Appliance(
+                name=name,
+                power_watts=a.power_watts,
+                quantity=a.quantity,
+                work_minutes=a.work_minutes,
+                cycle_minutes=a.cycle_minutes,
+                active_hours=a.active_hours,
+            )
+        )
+    db.add(
+        HouseSettings(
+            grid_limit_watts=limit,
+            voltage=req.voltage,
+            breaker_amps=req.breaker_amps,
+            price_day=req.price_day,
+            price_night=req.price_night,
+            night_start=req.night_start,
+            night_end=req.night_end,
+        )
+    )
     db.commit()
 
 
-@app.post("/api/simulate", response_model=SimulationResponse)
-def simulate(data: SimulationRequest, db: Session = Depends(get_db)):
-    """Приймає конфігурацію будинку та повертає добовий енергобаланс."""
+@app.post("/api/simulate")
+def simulate(req: SimulationRequest, db: Session = Depends(get_db)):
+    limit = req.voltage * req.breaker_amps
     try:
-        save_configuration(db, data)
+        save_config(db, req, limit)
     except Exception:
-        db.rollback()  # збій збереження не повинен блокувати розрахунок
+        db.rollback()  # збій збереження не блокує розрахунок
 
     try:
-        result = calculate_daily_balance(
-            appliances=[a.model_dump() for a in data.appliances],
-            solar_peak_w=data.solar.peak_power_w,
-            battery_capacity_wh=data.battery.capacity_wh,
-            initial_charge_wh=data.battery.initial_charge_wh or 0.0,
-            tariff_day=data.tariff_day,
+        return calculate_day(
+            req.appliances, limit, req.price_day, req.price_night,
+            req.night_start, req.night_end,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Помилка розрахунку: {exc}")
 
-    return result
+
+@app.get("/api/config")
+def get_config(db: Session = Depends(get_db)):
+    """Остання збережена конфігурація (null, якщо ще нічого не збережено)."""
+    s = db.query(HouseSettings).first()
+    if s is None:
+        return None
+    return {
+        "voltage": s.voltage,
+        "breaker_amps": s.breaker_amps,
+        "price_day": s.price_day,
+        "price_night": s.price_night,
+        "night_start": s.night_start,
+        "night_end": s.night_end,
+        "appliances": [
+            {
+                "name": a.name,
+                "power_watts": a.power_watts,
+                "quantity": a.quantity,
+                "work_minutes": a.work_minutes,
+                "cycle_minutes": a.cycle_minutes,
+                "active_hours": a.active_hours,
+            }
+            for a in db.query(Appliance).order_by(Appliance.id).all()
+        ],
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
