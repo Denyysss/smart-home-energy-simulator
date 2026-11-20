@@ -8,7 +8,13 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-page="home">
+<div class="ambient-bg" aria-hidden="true">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="bg-grid"></div>
+</div>
 <div class="layout">
 
   <!-- ===== LEFT SIDEBAR / NAV ===== -->
@@ -28,7 +34,8 @@
   </aside>
 
   <!-- ===== CENTER ===== -->
-  <main class="center">
+  <main class="center" id="scrollContainer">
+    <div class="scroll-progress" id="scrollProgress"></div>
     <header class="topbar">
       <div>
         <h1 id="pageTitle">Головна</h1>
@@ -128,14 +135,34 @@
 
       <!-- ===== VIEW: HOUSES ===== -->
       <section class="view" id="view-houses">
-        <div class="row-between"><h3 class="sec">Мої будинки</h3><button class="btn-y" onclick="openHouseForm()">+ Додати будинок</button></div>
+        <div class="page-hero houses-hero">
+          <div>
+            <span class="page-tag">🏢 АРХІТЕКТУРА ТА ОБ'ЄКТИ</span>
+            <h2>Керування будинками</h2>
+            <p>Порівнюйте квартири, дачі та офіси з індивідуальними лімітами автоматів і тарифами</p>
+          </div>
+          <div class="<button>" style="display:flex;align-items:center;gap:14px">
+            <button class="btn-y" onclick="openHouseForm()">+ Додати будинок</button>
+            <span class="page-hero-icon">🏘️</span>
+          </div>
+        </div>
         <div class="card"><b>⚖️ Порівняння будинків (оцінка за добу)</b><div class="chart-h" style="height:220px"><canvas id="chartHouses"></canvas></div></div>
         <div id="housesList" class="grid2"></div>
       </section>
 
       <!-- ===== VIEW: APPLIANCES ===== -->
       <section class="view" id="view-appliances">
-        <div class="row-between"><h3 class="sec" id="appTitle">Прилади</h3><div style="display:flex;gap:8px"><button class="btn-g" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button><button class="btn-y" onclick="openApplianceForm()">+ Додати прилад</button></div></div>
+        <div class="page-hero appliances-hero">
+          <div>
+            <span class="page-tag">🔌 ЕНЕРГОВУЗЛИ ТА РОЗКЛАД</span>
+            <h2 id="appTitle">Прилади</h2>
+            <p>Налаштовуйте години роботи, потужність та циклічність кожного приладу</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn-g" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button>
+            <button class="btn-y" onclick="openApplianceForm()">+ Додати прилад</button>
+          </div>
+        </div>
         <div class="kpis" id="appSum"></div>
         <div id="appGrid" class="grid2"></div>
         <div class="card"><b>🗓️ Розклад роботи приладів (24 години)</b><small class="muted">Жовтий — день, фіолетовий — ніч. Нижній рядок — сумарна потужність.</small><div id="timeline"></div></div>
@@ -144,6 +171,14 @@
 
       <!-- ===== VIEW: CHARTS ===== -->
       <section class="view" id="view-charts">
+        <div class="page-hero charts-hero">
+          <div>
+            <span class="page-tag">📊 ТЕЛЕМЕТРІЯ ТА МОНІТОРИНГ</span>
+            <h2>Візуалізація навантаження</h2>
+            <p>Погодинний профіль потужності, пікові зони, вартість та декомпозиція по приладах</p>
+          </div>
+          <span class="page-hero-icon">📈</span>
+        </div>
         <div class="card">
           <div class="row-between">
             <b>📊 Споживання</b>
@@ -174,6 +209,14 @@
         <!-- extra charts -->
       <!-- ===== VIEW: ANALYTICS ===== -->
       <section class="view" id="view-analytics">
+        <div class="page-hero analytics-hero">
+          <div>
+            <span class="page-tag">🌿 ЕНЕРГОЕФЕКТИВНІСТЬ ТА ЕКОНОМІЯ</span>
+            <h2>Глибока аналітика витрат</h2>
+            <p>Місячний та річний прогноз, потенціал нічного тарифу та екологічний слід CO₂</p>
+          </div>
+          <span class="page-hero-icon">🌱</span>
+        </div>
         <div class="kpis">
           <div class="kpi"><div class="kpi-ic y">📅</div><div class="kpi-v" id="aMonthKwh">—</div><div class="kpi-l">кВт·год / місяць (прогноз)</div></div>
           <div class="kpi"><div class="kpi-ic b">💳</div><div class="kpi-v" id="aMonthCost">—</div><div class="kpi-l">грн / місяць (прогноз)</div></div>
@@ -193,6 +236,14 @@
 
       <!-- ===== VIEW: SETTINGS ===== -->
       <section class="view" id="view-settings">
+        <div class="page-hero settings-hero">
+          <div>
+            <span class="page-tag">⚙️ КОНФІГУРАЦІЯ СИСТЕМИ</span>
+            <h2>Центр керування та налаштувань</h2>
+            <p>Тарифи, автомати захисту, візуалізація графіків та резервне копіювання даних</p>
+          </div>
+          <span class="page-hero-icon">🎛️</span>
+        </div>
         <div class="grid2">
           <div class="card">
             <b>👤 Профіль</b>

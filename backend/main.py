@@ -67,6 +67,8 @@ ALLOWED_ORIGINS = [
     for origin in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",")
     if origin.strip()
 ]
+if os.getenv("RENDER_EXTERNAL_URL"):
+    ALLOWED_ORIGINS.append(os.getenv("RENDER_EXTERNAL_URL").rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,

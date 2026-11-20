@@ -152,4 +152,108 @@ td,th{padding:8px 4px;border-bottom:1px solid var(--bd);text-align:left}th{color
 .opt-changes{margin-top:10px;display:flex;flex-direction:column;gap:6px;font-size:.8rem;color:var(--t2)}
 .opt-change-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:rgba(13,21,38,.6);padding:8px 12px;border-radius:8px;border:1px solid var(--bd);flex-wrap:wrap}
 .opt-change-row b{color:var(--t)}.opt-arrow{color:var(--y);font-weight:700;margin:0 6px}
+
+/* ============================================================
+   MOTION DESIGN & PER-PAGE INDIVIDUAL THEMES
+   ============================================================ */
+:root{
+  --theme-1:#FACC15;
+  --theme-2:#38BDF8;
+  --theme-3:#818CF8;
+  --theme-glow:rgba(250,204,21,.14);
+  --hero-grad:linear-gradient(135deg,rgba(30,45,74,.92),rgba(22,34,56,.88) 55%,rgba(56,189,248,.18));
+  --scroll-y:0px;
+  --scroll-pct:0;
+}
+body[data-page="home"]{
+  --theme-1:#FACC15;--theme-2:#38BDF8;--theme-3:#F97316;
+  --theme-glow:rgba(250,204,21,.15);
+  --hero-grad:linear-gradient(135deg,rgba(45,38,18,.88),rgba(22,34,56,.9) 55%,rgba(56,189,248,.22));
+}
+body[data-page="houses"]{
+  --theme-1:#06B6D4;--theme-2:#14B8A6;--theme-3:#38BDF8;
+  --theme-glow:rgba(6,182,212,.18);
+  --hero-grad:linear-gradient(135deg,rgba(8,51,68,.92),rgba(19,42,58,.9) 55%,rgba(20,184,166,.25));
+}
+body[data-page="appliances"]{
+  --theme-1:#A855F7;--theme-2:#F97316;--theme-3:#EC4899;
+  --theme-glow:rgba(168,85,247,.18);
+  --hero-grad:linear-gradient(135deg,rgba(59,7,100,.88),rgba(24,24,52,.92) 55%,rgba(249,115,22,.22));
+}
+body[data-page="charts"]{
+  --theme-1:#6366F1;--theme-2:#22D3EE;--theme-3:#FACC15;
+  --theme-glow:rgba(99,102,241,.2);
+  --hero-grad:linear-gradient(135deg,rgba(30,27,75,.92),rgba(15,23,42,.92) 55%,rgba(34,211,238,.24));
+}
+body[data-page="analytics"]{
+  --theme-1:#10B981;--theme-2:#84CC16;--theme-3:#14B8A6;
+  --theme-glow:rgba(16,185,129,.18);
+  --hero-grad:linear-gradient(135deg,rgba(6,78,59,.9),rgba(17,34,51,.92) 55%,rgba(132,204,22,.22));
+}
+body[data-page="settings"]{
+  --theme-1:#F43F5E;--theme-2:#94A3B8;--theme-3:#38BDF8;
+  --theme-glow:rgba(244,63,94,.16);
+  --hero-grad:linear-gradient(135deg,rgba(76,5,25,.85),rgba(22,34,56,.92) 55%,rgba(148,163,184,.2));
+}
+
+/* Легкий швидкодіючий фон без важких filter:blur та backdrop-filter (60 FPS) */
+.ambient-bg{
+  position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;
+  background:
+    radial-gradient(650px circle at 20% 10%, var(--theme-glow), transparent 70%),
+    radial-gradient(700px circle at 85% 85%, var(--theme-glow), transparent 70%);
+  transition:background .4s ease;
+}
+.orb,.bg-grid{display:none}
+.layout{position:relative;z-index:1}
+
+/* Верхній індикатор прогресу скролу */
+.scroll-progress{position:sticky;top:0;left:0;height:3px;width:0%;background:linear-gradient(90deg,var(--theme-1),var(--theme-2));z-index:30;will-change:width}
+
+/* Індивідуальні Hero-банери для кожної сторінки */
+.hero,.page-hero{
+  background:var(--hero-grad)!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  border-radius:18px;padding:24px 26px;
+  display:flex;justify-content:space-between;align-items:center;gap:18px;
+  position:relative;overflow:hidden;
+  box-shadow:0 10px 24px -10px rgba(0,0,0,.45);
+}
+.page-hero h2{font-size:1.35rem;margin:8px 0 4px;letter-spacing:-.01em}
+.page-hero p{font-size:.82rem;color:var(--t2);max-width:560px;line-height:1.45}
+.page-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:20px;font-size:.68rem;font-weight:700;letter-spacing:.06em;background:rgba(255,255,255,.08);color:var(--theme-1);border:1px solid rgba(255,255,255,.12)}
+.page-hero-icon,.hero-emoji{font-size:3.4rem}
+
+/* Активний пункт меню під колір поточної сторінки */
+.nav-item.active{background:var(--theme-glow)!important;color:var(--theme-1)!important;border-left:3px solid var(--theme-1)}
+
+/* Легкий hover-ефект карток тільки через transform і border-color (GPU compositor) */
+.card,.kpi,.item,.quick button{
+  transition:transform .2s ease,border-color .2s ease;
+}
+.card:hover,.kpi:hover,.item:hover{
+  border-color:var(--theme-1);
+  transform:translateY(-2px);
+}
+
+/* Швидка поява блоків при скролі (тільки opacity + translate3d, без blur) */
+.reveal-item{
+  opacity:0;
+  transform:translate3d(0,18px,0);
+  transition:opacity .32s ease-out,transform .32s ease-out;
+  transition-delay:var(--stagger,0ms);
+  will-change:opacity,transform;
+}
+.reveal-item.in-view{
+  opacity:1;
+  transform:translate3d(0,0,0);
+}
+
+/* Плавний і легкий перехід при перемиканні сторінок */
+.view.active{animation:pageMorph .25s ease-out both}
+@keyframes pageMorph{
+  from{opacity:0;transform:translate3d(0,10px,0)}
+  to{opacity:1;transform:translate3d(0,0,0)}
+}
+
 @media(max-width:860px){.rowbar{grid-template-columns:90px 1fr 56px}.tl-r,.tl-h{grid-template-columns:70px 1fr}}

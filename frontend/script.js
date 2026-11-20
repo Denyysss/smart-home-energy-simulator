@@ -508,6 +508,7 @@ function renderData() {
     renderAnalytics(h, dk, nk);
     renderExtras(h, dk, nk);
     drawAll();
+    setupScrollMotion();
     previewOptimization(false);
 }
 
@@ -596,12 +597,15 @@ function drawBase() {
 // ============================================================
 function setView(v) {
     if (!VIEWS[v]) v = "home";
+    document.body.dataset.page = v;
     document.querySelectorAll(".view").forEach(e => e.classList.toggle("active", e.id === "view-" + v));
     document.querySelectorAll(".nav-item").forEach(e => e.classList.toggle("active", e.dataset.view === v));
     $("pageTitle").textContent = VIEWS[v][0]; $("pageSub").textContent = VIEWS[v][1];
     if (location.hash !== "#" + v) history.replaceState(null, "", "#" + v);
-    document.querySelector(".center").scrollTo(0, 0);
+    const sc = document.querySelector(".center");
+    if (sc) sc.scrollTo(0, 0);
     drawAll();
+    setupScrollMotion();
 }
 
 // ============================================================
@@ -799,6 +803,69 @@ $("importFile").addEventListener("change", e => {
     r.onload = () => { try { const s = JSON.parse(r.result); if (!Array.isArray(s.houses) || !s.houses.length) throw 0; state = { ...defaultState(), ...s }; save(); refresh(); toast("Імпортовано"); } catch (err) { toast("⚠️ Некоректний файл"); } };
     r.readAsText(f); e.target.value = "";
 });
+
+// ============================================================
+// 9. MOTION DESIGN: SCROLL REVEAL, PARALLAX & CURSOR SPOTLIGHT
+// ============================================================
+let scrollObserver = null;
+
+function setupScrollMotion() {
+    const activeView = document.querySelector(".view.active");
+    if (!activeView) return;
+    const targets = activeView.querySelectorAll(".hero, .page-hero, .kpi, .card, .item, .quick button, .stat");
+
+    if (scrollObserver) scrollObserver.disconnect();
+    const sc = $("scrollContainer") || document.querySelector(".center");
+
+    let batch = 0;
+    let batchTimer = null;
+    scrollObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const delay = Math.min(batch * 50, 300);
+                batch++;
+                clearTimeout(batchTimer);
+                batchTimer = setTimeout(() => { batch = 0; }, 120);
+                entry.target.style.setProperty("--stagger", `${delay}ms`);
+                entry.target.classList.add("in-view");
+                scrollObserver.unobserve(entry.target);
+            }
+        });
+    }, { root: null, threshold: 0.02 });
+
+    const vh = window.innerHeight || 900;
+    targets.forEach((el, idx) => {
+        el.classList.add("reveal-item");
+        const rect = el.getBoundingClientRect();
+        if (rect.top < vh + 40) {
+            // Елементи на першому екрані одразу анімуються каскадом
+            el.style.setProperty("--stagger", `${Math.min(idx * 45, 280)}ms`);
+            requestAnimationFrame(() => el.classList.add("in-view"));
+        } else {
+            // Елементи нижче за екраном анімуються під час скролу вниз
+            el.classList.remove("in-view");
+            scrollObserver.observe(el);
+        }
+    });
+}
+
+// Індикатор прогресу скролу через requestAnimationFrame (без навантаження на GPU)
+const scEl = $("scrollContainer") || document.querySelector(".center");
+const progEl = $("scrollProgress");
+if (scEl && progEl) {
+    let ticking = false;
+    scEl.addEventListener("scroll", () => {
+        if (!ticking) {
+            requestAnimationFrame(() => {
+                const maxScroll = Math.max(1, scEl.scrollHeight - scEl.clientHeight);
+                const pct = Math.min(100, Math.max(0, (scEl.scrollTop / maxScroll) * 100));
+                progEl.style.width = `${pct.toFixed(1)}%`;
+                ticking = false;
+            });
+            ticking = true;
+        }
+    }, { passive: true });
+}
 
 // ============================================================
 // СТАРТ
