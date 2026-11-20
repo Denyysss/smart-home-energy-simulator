@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚡ ЕнергіяДім — Контроль твоїх витрат</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- ===== LEFT SIDEBAR / NAV ===== -->
+  <aside class="sidebar">
+    <div class="brand"><span>⚡</span><span class="brand-name">ЕнергіяДім</span></div>
+    <div class="brand-sub">Контроль твоїх витрат</div>
+    <nav>
+      <button class="nav-item" data-view="home"><i>🏠</i><span>Головна</span></button>
+      <button class="nav-item" data-view="houses"><i>🏢</i><span>Будинки</span></button>
+      <button class="nav-item" data-view="appliances"><i>🔌</i><span>Прилади</span></button>
+      <button class="nav-item" data-view="charts"><i>📊</i><span>Графіки</span></button>
+      <button class="nav-item" data-view="analytics"><i>📈</i><span>Аналітика</span></button>
+      <button class="nav-item" data-view="settings"><i>⚙️</i><span>Налаштування</span></button>
+    </nav>
+    <div class="sp"></div>
+    <div class="eco"><div>🌿</div><p>Разом до енергоефективності!</p></div>
+  </aside>
+
+  <!-- ===== CENTER ===== -->
+  <main class="center">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Головна</h1>
+        <p id="pageSub"></p>
+      </div>
+      <div class="top-right">
+        <div class="search"><span>🔍</span><input id="searchInput" placeholder="Пошук будинку..."></div>
+        <button class="icon-btn" id="bellBtn" title="Події">🔔<b class="badge" id="bellBadge">0</b></button>
+        <button class="profile" id="profileBtn" title="Змінити профіль">
+          <span class="avatar" id="avatar">А</span><span id="profileName">Артем</span><small>▾</small>
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="banner err" id="apiErr" style="display:none">⚠️ Бекенд недоступний. Запустіть: <code>python -m uvicorn main:app --port 8000</code></div>
+
+      <!-- ===== VIEW: HOME ===== -->
+      <section class="view" id="view-home">
+        <div class="hero">
+          <div>
+            <span class="status"><i class="dot"></i> Онлайн</span>
+            <h2 id="heroName">Мій будинок</h2>
+            <p id="heroAddr">📍</p>
+          </div>
+          <div class="hero-emoji">🏠</div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-ic y">⚡</div><div class="kpi-v" id="kKwh">—</div><div class="kpi-l">кВт·год за добу</div></div>
+          <div class="kpi"><div class="kpi-ic b">💰</div><div class="kpi-v" id="kCost">—</div><div class="kpi-l">грн за добу</div></div>
+          <div class="kpi"><div class="kpi-ic p">🕒</div><div class="kpi-v" id="kSplit">—</div><div class="kpi-l">день / ніч, кВт·год</div></div>
+        </div>
+
+        <div class="card">
+          <div class="row-between"><b>Поточне навантаження</b><span class="pill ok" id="gBadge">🟢 Нормальне</span></div>
+          <div class="bar"><div class="bar-fill" id="gBar"></div></div>
+          <small class="muted" id="gText"></small>
+        </div>
+
+        <div class="banner over" id="overBanner" style="display:none">
+          <div>⚠️ <b id="overText"></b></div>
+          <small>Розведіть потужні прилади по різних годинах або скористайтесь авто-оптимізатором.</small><br>
+          <button class="btn-y sm" onclick="previewOptimization(true)">✨ Оптимізувати розклад</button>
+          <button class="btn-g sm" onclick="setView('charts')" style="margin-left:8px;padding:7px 14px">Переглянути графік</button>
+        </div>
+        <div class="banner okb" id="okBanner" style="display:none"></div>
+
+        <!-- ===== КАРТКА РОЗУМНОГО ОПТИМІЗАТОРА ===== -->
+        <div class="card opt-card" id="optCard">
+          <div class="row-between" style="flex-wrap:wrap;gap:12px">
+            <div>
+              <b>✨ Розумний оптимізатор розкладу</b>
+              <small class="muted" style="margin:4px 0 0">Переносить гнучкі потужні прилади (бойлер, пральна машина, посудомийка, зарядка авто) на нічний тариф (23:00–07:00) без перевантажень автомата.</small>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-y" id="btnRunOpt" onclick="previewOptimization(true)">✨ Оптимізувати розклад</button>
+              <button class="btn-ok" id="btnApplyOpt" onclick="applyOptimization()" style="display:none">✅ Застосувати</button>
+            </div>
+          </div>
+          <div class="opt-result" id="optResult" style="display:none">
+            <div class="opt-headline" id="optHeadline"></div>
+            <div class="opt-changes" id="optChanges"></div>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="card"><b>🏆 Топ споживачів</b><div id="topList"></div></div>
+          <div class="card"><b>🌗 День / ніч</b><div class="chart-h" style="height:210px"><canvas id="chartDN"></canvas></div></div>
+        </div>
+        <h3 class="sec">Швидкі дії</h3>
+        <div class="quick">
+          <button onclick="openApplianceForm()"><i>➕</i>Додати прилад</button>
+          <button onclick="openHouseForm(activeHouse())"><i>✏️</i>Редагувати будинок</button>
+          <button onclick="setView('charts')"><i>📊</i>Переглянути графіки</button>
+          <button onclick="setView('analytics')"><i>🕒</i>Аналітика витрат</button>
+        </div>
+
+        <div class="card">
+          <div class="row-between"><b>📊 Споживання електроенергії по годинах</b></div>
+          <div class="chart-h"><canvas id="chartHome"></canvas></div>
+          <div class="legend"></div>
+        </div>
+
+        <div class="card">
+          <b>🔔 Останні події</b>
+          <div id="eventsList"></div>
+        </div>
+
+        <div class="today">
+          <div class="card c"><i>🏠</i><b id="tKwh">—</b><small>кВт·год</small></div>
+          <div class="card c"><i>💰</i><b id="tCost">—</b><small>грн</small></div>
+          <div class="card c"><i>📈</i><b id="tPeak">—</b><small>пік, Вт</small></div>
+          <div class="card c"><i>🔌</i><b id="tCount">—</b><small>прилади увімк.</small></div>
+        </div>
+      </section>
+
+      <!-- ===== VIEW: HOUSES ===== -->
+      <section class="view" id="view-houses">
+        <div class="row-between"><h3 class="sec">Мої будинки</h3><button class="btn-y" onclick="openHouseForm()">+ Додати будинок</button></div>
+        <div class="card"><b>⚖️ Порівняння будинків (оцінка за добу)</b><div class="chart-h" style="height:220px"><canvas id="chartHouses"></canvas></div></div>
+        <div id="housesList" class="grid2"></div>
+      </section>
+
+      <!-- ===== VIEW: APPLIANCES ===== -->
+      <section class="view" id="view-appliances">
+        <div class="row-between"><h3 class="sec" id="appTitle">Прилади</h3><div style="display:flex;gap:8px"><button class="btn-g" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button><button class="btn-y" onclick="openApplianceForm()">+ Додати прилад</button></div></div>
+        <div class="kpis" id="appSum"></div>
+        <div id="appGrid" class="grid2"></div>
+        <div class="card"><b>🗓️ Розклад роботи приладів (24 години)</b><small class="muted">Жовтий — день, фіолетовий — ніч. Нижній рядок — сумарна потужність.</small><div id="timeline"></div></div>
+        <div class="card"><b>📚 Каталог приладів</b><small class="muted">Натисніть на прилад, щоб додати його до будинку.</small><div id="gallery" class="gal"></div></div>
+      </section>
+
+      <!-- ===== VIEW: CHARTS ===== -->
+      <section class="view" id="view-charts">
+        <div class="card">
+          <div class="row-between">
+            <b>📊 Споживання</b>
+            <div class="pills" id="rangePills">
+              <button data-r="day" class="active">День</button>
+              <button data-r="week">Тиждень</button>
+              <button data-r="month">Місяць</button>
+            </div>
+          </div>
+          <small class="muted" id="rangeNote"></small>
+          <div class="chart-h tall"><canvas id="chartWatt"></canvas></div>
+          <div class="legend"></div>
+        </div>
+        <div class="card">
+          <b>💰 Вартість по годинах</b>
+          <div class="chart-h"><canvas id="chartCost"></canvas></div>
+          <div class="legend2"></div>
+        </div>
+        <div class="card">
+          <b>🧱 Внесок кожного приладу (по годинах)</b>
+          <div class="chart-h tall"><canvas id="chartStack"></canvas></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><b>📈 Профіль навантаження і ліміт</b><div class="chart-h"><canvas id="chartLine"></canvas></div></div>
+          <div class="card"><b>🧾 Накопичена вартість за добу</b><div class="chart-h"><canvas id="chartCum"></canvas></div></div>
+        </div>
+      </section>
+        <!-- extra charts -->
+      <!-- ===== VIEW: ANALYTICS ===== -->
+      <section class="view" id="view-analytics">
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-ic y">📅</div><div class="kpi-v" id="aMonthKwh">—</div><div class="kpi-l">кВт·год / місяць (прогноз)</div></div>
+          <div class="kpi"><div class="kpi-ic b">💳</div><div class="kpi-v" id="aMonthCost">—</div><div class="kpi-l">грн / місяць (прогноз)</div></div>
+          <div class="kpi"><div class="kpi-ic p">🌙</div><div class="kpi-v" id="aSave">—</div><div class="kpi-l">економія, якщо перенести день→ніч</div></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><b>🍩 Частка приладів у споживанні</b><div class="chart-h"><canvas id="chartShare"></canvas></div></div>
+          <div class="card"><b>📋 Витрати по приладах</b><div id="aTable"></div></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><b>⏰ Найвигідніший час для потужних приладів</b><div id="aBest"></div></div>
+          <div class="card"><b>⚖️ Порівняння тарифів</b><div id="aTariff"></div></div>
+        </div>
+        <div class="card"><b>🌿 Еко-показники</b><div id="aEco" class="stats"></div></div>
+        <div class="card"><b>💡 Поради</b><div id="aTips"></div></div>
+      </section>
+
+      <!-- ===== VIEW: SETTINGS ===== -->
+      <section class="view" id="view-settings">
+        <div class="grid2">
+          <div class="card">
+            <b>👤 Профіль</b>
+            <p class="muted" id="sProfile"></p>
+            <button class="btn-g" onclick="openProfileForm()">Змінити ім'я</button>
+          </div>
+          <div class="card">
+            <b>🕒 Тарифи</b>
+            <p class="muted" id="sTariff"></p>
+            <button class="btn-g" onclick="openTariffForm()">Змінити тарифи</button>
+          </div>
+          <div class="card">
+            <b>⚡ Ліміт автомата</b>
+            <p class="muted" id="sLimitTxt"></p>
+            <button class="btn-g" onclick="openLimitForm()">Змінити ліміт</button>
+          </div>
+          <div class="card">
+            <b>⏱️ Параметри графіків і сповіщень</b>
+            <p class="muted" id="sChart"></p>
+            <button class="btn-g" onclick="openChartForm()">Змінити параметри</button>
+          </div>
+          <div class="card">
+            <b>🔗 Бекенд</b>
+            <p class="muted" id="sApi"></p>
+            <button class="btn-g" onclick="openApiForm()">Змінити адресу</button>
+          </div>
+          <div class="card">
+            <b>🗑️ Дані</b>
+            <p class="muted">Усі дані зберігаються у браузері (localStorage).</p>
+            <button class="btn-r" onclick="resetAll()">Скинути все</button>
+          </div>
+          <div class="card">
+            <b>💾 Резервна копія</b>
+            <p class="muted">Експорт і імпорт усіх будинків, приладів і налаштувань у файл JSON.</p>
+            <button class="btn-g" onclick="exportData()">⬇️ Експорт</button>
+            <button class="btn-g" onclick="$('importFile').click()">⬆️ Імпорт</button>
+            <input type="file" id="importFile" accept=".json" style="display:none">
+          </div>
+          <div class="card">
+            <b>ℹ️ Про проєкт</b>
+            <p class="muted">ЕнергіяДім — симулятор споживання електроенергії побутовими приладами. Двозонний тариф: ніч 23:00–07:00, день 07:00–23:00. Розрахунок виконує FastAPI-бекенд (<code>/api/simulate</code>).</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== RIGHT SIDEBAR ===== -->
+  <aside class="right">
+    <div class="house-sw" id="houseSwitch" title="Перемкнути будинок">
+      <span class="hs-i">🏠</span>
+      <div class="grow"><small class="muted">Будинок</small><div id="hsName" class="bold"></div><small class="green">● Онлайн</small></div>
+      <small>▾</small>
+    </div>
+    <div class="row-between"><b>Прилади</b><button class="round" onclick="openApplianceForm()">+</button></div>
+    <div id="rsList"></div>
+    <button class="dashed" onclick="openApplianceForm()">+ Додати прилад</button>
+    <button class="btn-y" style="width:100%" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button>
+
+    <b>Налаштування будинку</b>
+    <button class="set" onclick="openTariffForm()"><i>🕒</i><div class="grow"><div>Тарифи на електроенергію</div><small id="rsTariff"></small></div>›</button>
+    <button class="set" onclick="openLimitForm()"><i>⚡</i><div class="grow"><div>Ліміти автоматів</div><small id="rsLimit"></small></div>›</button>
+    <button class="set" onclick="openChartForm()"><i>⏱️</i><div class="grow"><div>Параметри графіків</div><small>Сигнали та сповіщення</small></div>›</button>
+  </aside>
+</div>
+
+<!-- ===== GENERIC MODAL ===== -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="row-between"><b id="mTitle"></b><button class="x" onclick="closeModal()">✕</button></div>
+    <div id="mBody"></div>
+    <div class="m-actions"><button class="btn-g" onclick="closeModal()">Скасувати</button><button class="btn-y" id="mSave">Зберегти</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
