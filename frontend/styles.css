@@ -297,4 +297,17 @@ body[data-page="settings"]{
   .print-report th{background:#F1F5F9;font-weight:700}
 }
 
+/* Екран входу та реєстрації */
+.auth-screen{display:none;position:fixed;inset:0;z-index:300;background:radial-gradient(600px circle at 25% 20%,rgba(250,204,21,.14),transparent 65%),radial-gradient(650px circle at 80% 80%,rgba(56,189,248,.14),transparent 65%),#060B16;align-items:center;justify-content:center;padding:20px}
+.auth-screen.show{display:flex}
+.auth-box{background:var(--card);border:1px solid var(--bd2);border-radius:20px;padding:28px;width:100%;max-width:410px;box-shadow:0 24px 60px rgba(0,0,0,.65);animation:fi .2s ease}
+.auth-logo{font-size:1.4rem;text-align:center;margin-bottom:6px}
+.auth-logo b{background:linear-gradient(135deg,var(--y),var(--o));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.auth-sub{font-size:.78rem;color:var(--t3);text-align:center;line-height:1.45;margin-bottom:18px}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--inp);padding:4px;border-radius:12px;margin-bottom:8px}
+.auth-tabs button{border:none;background:none;padding:9px;border-radius:9px;font-size:.85rem;font-weight:600;color:var(--t3);transition:.15s}
+.auth-tabs button.active{background:var(--y);color:#060B16}
+.auth-err{margin-top:12px;padding:9px 12px;border-radius:9px;background:rgba(239,68,68,.15);border:1px solid var(--r);color:#FCA5A5;font-size:.8rem}
+.auth-divider{text-align:center;color:var(--t3);font-size:.75rem;margin:14px 0}
+
 @media(max-width:860px){.rowbar{grid-template-columns:90px 1fr 56px}.tl-r,.tl-h{grid-template-columns:70px 1fr}.outage-grid{grid-template-columns:repeat(6,1fr)}.sm-pdf{display:none}}

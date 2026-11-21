@@ -44,10 +44,11 @@ function detectDefaultApi() {
     return `${proto}//${host}:8000`;
 }
 
-const KEY = "energydim.v2";
+const KEY = "energydim.v3";
 function defaultState() {
     return {
-        profile: { name: "Артем" },
+        auth: null, // { token, user: { id, name, username } }
+        profile: { name: "Гість" },
         activeHouse: 1,
         settings: { api: detectDefaultApi(), showLimit: true, alerts: true, warnPercent: 80, chartMax: 0 },
         houses: [{ id: 1, name: "Мій будинок", address: "вул. Центральна, 8", voltage: 230, amps: 16, dayRate: 4.32, nightRate: 2.16, appliances: [] }],
@@ -99,11 +100,19 @@ function addEvent(type, title, desc) {
 }
 
 async function apiFetch(path, options = {}) {
-    const opts = { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } };
-    const r = await fetch(apiUrl(path), opts);
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (state.auth && state.auth.token && !headers.Authorization) {
+        headers.Authorization = "Bearer " + state.auth.token;
+    }
+    const r = await fetch(apiUrl(path), { ...options, headers });
     if (!r.ok) {
         let detail = "HTTP " + r.status;
         try { const err = await r.json(); if (err.detail) detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail); } catch (e) {}
+        if (r.status === 401 && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register")) {
+            state.auth = null;
+            save();
+            showAuthScreen();
+        }
         throw new Error(detail);
     }
     return r.json();
@@ -177,8 +186,30 @@ $("mSave").addEventListener("click", async () => {
 // 3. ФОРМИ ТА РОБОТА З БАЗОЮ ДАНИХ (/api/houses)
 // ============================================================
 function openProfileForm() {
-    openForm({ title: "👤 Профіль", fields: [{ key: "name", label: "Ім'я", value: state.profile.name }],
-        onSave: v => { if (!v.name.trim()) return "Введіть ім'я"; state.profile.name = v.name.trim(); save(); renderShell(); toast("Профіль оновлено"); } });
+    const uname = state.auth?.user?.username ? `Логін: <b>${esc(state.auth.user.username)}</b>` : "";
+    openForm({
+        title: "👤 Особистий профіль",
+        fields: [
+            { type: "html", key: "uinfo", html: uname ? `<div class="muted" style="margin:4px 0 10px">${uname}</div>` : "" },
+            { key: "name", label: "Ваше ім'я", value: state.profile.name },
+            { type: "html", key: "logout", html: `<div style="margin-top:14px"><button type="button" class="btn-r" style="width:100%" onclick="closeModal();logoutUser()">🚪 Вийти з акаунта</button></div>` },
+        ],
+        onSave: async v => {
+            const newName = v.name.trim();
+            if (!newName) return "Введіть ім'я";
+            if (state.auth && state.auth.token) {
+                const updated = await apiFetch("/api/auth/me", {
+                    method: "PUT",
+                    body: JSON.stringify({ name: newName }),
+                });
+                state.auth.user = updated;
+            }
+            state.profile.name = newName;
+            save();
+            renderShell();
+            toast("Профіль оновлено");
+        },
+    });
 }
 function openTariffForm() {
     const h = activeHouse();
@@ -329,8 +360,12 @@ async function resetAll() {
     if (!confirm("Скинути всі дані у базі даних та браузері до початкових?")) return;
     try {
         const houses = await apiFetch("/api/reset", { method: "POST" });
+        const savedAuth = state.auth;
+        const savedProfile = state.profile;
         localStorage.removeItem(KEY);
         state = defaultState();
+        state.auth = savedAuth;
+        state.profile = savedProfile;
         state.houses = houses;
         state.activeHouse = houses[0]?.id || 1;
         await refresh();
@@ -383,14 +418,107 @@ async function deleteHouse(id) {
 }
 
 // ============================================================
-// 4. БЕКЕНД ТА ІНІЦІАЛІЗАЦІЯ З БД
+// 4. АВТОРИЗАЦІЯ, БЕКЕНД ТА ІНІЦІАЛІЗАЦІЯ З БД
 // ============================================================
-async function initFromDb() {
+let authMode = "login";
+
+function switchAuthTab(mode) {
+    authMode = mode;
+    $("authTabLogin").classList.toggle("active", mode === "login");
+    $("authTabReg").classList.toggle("active", mode === "register");
+    $("authNameWrap").style.display = mode === "register" ? "block" : "none";
+    $("authSubmitBtn").textContent = mode === "register" ? "Створити акаунт" : "Увійти";
+    $("authErr").style.display = "none";
+}
+
+function showAuthScreen() {
+    $("authErr").style.display = "none";
+    $("authScreen").classList.add("show");
+}
+
+function hideAuthScreen() {
+    $("authScreen").classList.remove("show");
+}
+
+async function submitAuth(e) {
+    e.preventDefault();
+    $("authErr").style.display = "none";
+    const username = $("authUser").value.trim();
+    const password = $("authPass").value;
+    const name = $("authName").value.trim();
+
+    if (authMode === "register" && !name) {
+        $("authErr").textContent = "Введіть ваше ім'я";
+        $("authErr").style.display = "block";
+        return;
+    }
+
     try {
-        const [catData, housesData] = await Promise.all([
+        const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+        const body = authMode === "register" ? { name, username, password } : { username, password };
+        const res = await apiFetch(endpoint, { method: "POST", body: JSON.stringify(body) });
+        state.auth = { token: res.token, user: res.user };
+        state.profile.name = res.user.name;
+        state.events = [];
+        lastOverKey = null;
+        save();
+        hideAuthScreen();
+        await initFromDb();
+        toast(`Вітаємо, ${res.user.name}!`);
+    } catch (err) {
+        $("authErr").textContent = err.message;
+        $("authErr").style.display = "block";
+    }
+}
+
+async function quickDemoLogin() {
+    $("authErr").style.display = "none";
+    const id = Date.now().toString(36).slice(-5);
+    const username = `guest_${id}`;
+    const password = `demo_${id}`;
+    const name = `Гість ${id.toUpperCase()}`;
+    try {
+        const res = await apiFetch("/api/auth/register", {
+            method: "POST",
+            body: JSON.stringify({ name, username, password }),
+        });
+        state.auth = { token: res.token, user: res.user };
+        state.profile.name = res.user.name;
+        state.events = [];
+        lastOverKey = null;
+        save();
+        hideAuthScreen();
+        await initFromDb();
+        toast(`Створено окремий демо-кабінет: ${res.user.name}`);
+    } catch (err) {
+        $("authErr").textContent = err.message;
+        $("authErr").style.display = "block";
+    }
+}
+
+function logoutUser() {
+    state.auth = null;
+    state.events = [];
+    lastOverKey = null;
+    sim = null;
+    save();
+    showAuthScreen();
+    toast("Ви вийшли з акаунта");
+}
+
+async function initFromDb() {
+    if (!state.auth || !state.auth.token) {
+        showAuthScreen();
+        return;
+    }
+    try {
+        const [meData, catData, housesData] = await Promise.all([
+            apiFetch("/api/auth/me"),
             apiFetch("/api/catalog"),
             apiFetch("/api/houses"),
         ]);
+        state.auth.user = meData;
+        state.profile.name = meData.name;
         catalog = catData;
         if (Array.isArray(housesData) && housesData.length > 0) {
             state.houses = housesData;
@@ -398,9 +526,11 @@ async function initFromDb() {
                 state.activeHouse = state.houses[0].id;
             }
         }
+        hideAuthScreen();
         $("apiErr").style.display = "none";
         await refresh();
     } catch (e) {
+        if (!state.auth || !state.auth.token) return;
         $("apiErr").style.display = "block";
     }
 }
@@ -459,7 +589,7 @@ function renderShell() {
     $("heroName").textContent = h.name; $("heroAddr").textContent = "📍 " + (h.address || "адресу не вказано");
     $("hsName").textContent = h.address || h.name;
     $("rsTariff").textContent = `День: ${h.dayRate} / Ніч: ${h.nightRate} грн`; $("rsLimit").textContent = `${limitOf(h)} Вт (${h.voltage} В × ${h.amps} А)`;
-    $("sProfile").textContent = `Ім'я: ${state.profile.name}`;
+    $("sProfile").textContent = `Ім'я: ${state.profile.name}` + (state.auth?.user?.username ? ` • Логін: ${state.auth.user.username}` : "");
     $("sTariff").textContent = `Будинок «${h.name}»: день ${h.dayRate} грн, ніч ${h.nightRate} грн за кВт·год`;
     $("sLimitTxt").textContent = `${h.voltage} В × ${h.amps} А = ${limitOf(h)} Вт`;
     const s = state.settings;

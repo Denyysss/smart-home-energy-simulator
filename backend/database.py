@@ -32,6 +32,22 @@ Base = declarative_base()
 
 
 # ============================================================
+# 0. КОРИСТУВАЧІ (особисті акаунти)
+# ============================================================
+class User(Base):
+    """Користувач системи з власним набором будинків та приладів."""
+    __tablename__ = "users"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    username      = Column(String(100), nullable=False, unique=True, index=True)
+    name          = Column(String(100), nullable=False)
+    password_hash = Column(String(200), nullable=False)
+    salt          = Column(String(64),  nullable=False)
+
+    houses = relationship("House", back_populates="owner", cascade="all, delete-orphan")
+
+
+# ============================================================
 # 1. ДОВІДНИК ПРИЛАДІВ (каталог)
 # ============================================================
 class ApplianceCatalog(Base):
@@ -61,6 +77,7 @@ class House(Base):
     __tablename__ = "houses"
 
     id              = Column(Integer, primary_key=True, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     name            = Column(String(100), nullable=False)
     address         = Column(String(200), nullable=True, default="")
     voltage         = Column(Float, nullable=False, default=230.0)
@@ -70,6 +87,7 @@ class House(Base):
     night_rate      = Column(Float, nullable=False, default=2.16)
     outage_hours    = Column(Text,  nullable=False, default="[]")
 
+    owner = relationship("User", back_populates="houses")
     appliances = relationship(
         "HouseAppliance",
         back_populates="house",
@@ -115,6 +133,7 @@ def _ensure_columns():
 
     migrations = {
         "houses": [
+            ("user_id", "INTEGER"),
             ("address", "VARCHAR(200) DEFAULT ''"),
             ("voltage", "FLOAT DEFAULT 230.0"),
             ("amps", "FLOAT DEFAULT 16.0"),
@@ -231,13 +250,15 @@ def seed_catalog(db):
     seed_default_house(db)
 
 
-def seed_default_house(db):
-    """Створює демонстраційний будинок з приладами, якщо таблиця будинків порожня."""
-    if db.query(House).count() > 0:
+def seed_default_house(db, user_id: int | None = None, house_name: str = "Мій будинок"):
+    """Створює демонстраційний будинок з приладами для користувача (або анонімного контексту)."""
+    q = db.query(House).filter(House.user_id.is_(None) if user_id is None else House.user_id == user_id)
+    if q.count() > 0:
         return
 
     house = House(
-        name="Мій будинок",
+        user_id=user_id,
+        name=house_name,
         address="вул. Центральна, 8",
         voltage=230.0,
         amps=16.0,

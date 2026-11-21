@@ -275,3 +275,48 @@ def test_house_preset_endpoint():
         finally:
             assert client.delete(f"/api/houses/{hid}").status_code == 200
 
+
+def test_multi_user_account_isolation():
+    """Кожен користувач бачить лише свої будинки і не має доступу до чужих."""
+    import uuid
+    suffix = uuid.uuid4().hex[:8]
+    u1_name = f"user1_{suffix}"
+    u2_name = f"user2_{suffix}"
+
+    with TestClient(app) as client:
+        # Реєструємо двох різних користувачів
+        r1 = client.post("/api/auth/register", json={"name": "Іван", "username": u1_name, "password": "secret1"})
+        assert r1.status_code == 200
+        tok1 = r1.json()["token"]
+        h1_headers = {"Authorization": f"Bearer {tok1}"}
+
+        r2 = client.post("/api/auth/register", json={"name": "Олена", "username": u2_name, "password": "secret2"})
+        assert r2.status_code == 200
+        tok2 = r2.json()["token"]
+        h2_headers = {"Authorization": f"Bearer {tok2}"}
+
+        # Кожен бачить лише свій будинок
+        houses1 = client.get("/api/houses", headers=h1_headers).json()
+        houses2 = client.get("/api/houses", headers=h2_headers).json()
+        assert len(houses1) == 1
+        assert len(houses2) == 1
+        assert houses1[0]["id"] != houses2[0]["id"]
+        assert "Іван" in houses1[0]["name"]
+        assert "Олена" in houses2[0]["name"]
+
+        # user2 не може змінити або видалити будинок user1
+        hid1 = houses1[0]["id"]
+        assert client.put(f"/api/houses/{hid1}", json={"name": "Злам"}, headers=h2_headers).status_code == 404
+        assert client.delete(f"/api/houses/{hid1}", headers=h2_headers).status_code == 404
+
+        # Перевірка входу та оновлення імені профілю
+        r_login = client.post("/api/auth/login", json={"username": u1_name, "password": "secret1"})
+        assert r_login.status_code == 200
+        tok1_new = r_login.json()["token"]
+        r_upd_me = client.put("/api/auth/me", json={"name": "Іван Петренко"}, headers={"Authorization": f"Bearer {tok1_new}"})
+        assert r_upd_me.status_code == 200
+        assert r_upd_me.json()["name"] == "Іван Петренко"
+
+        # Підроблений токен відхиляється з 401
+        assert client.get("/api/houses", headers={"Authorization": "Bearer invalid.token"}).status_code == 401
+

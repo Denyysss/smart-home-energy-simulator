@@ -17,12 +17,17 @@ main.py — FastAPI сервер (REST API).
   POST   /api/reset                                — Скинути будинки до початкових даних
 """
 
+import base64
 from contextlib import asynccontextmanager
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+import secrets
+import time
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -30,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from database import (
     SessionLocal, init_db, seed_catalog, seed_default_house,
-    ApplianceCatalog, House, HouseAppliance
+    ApplianceCatalog, House, HouseAppliance, User
 )
 from simulation import simulate, optimize_schedule, ApplianceInput
 
@@ -87,6 +92,75 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# ---------- Авторизація та ізоляція користувачів ----------
+AUTH_SECRET = os.getenv("AUTH_SECRET", "energydim-dev-secret-change-in-prod-2026").encode("utf-8")
+TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 днів
+
+
+def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    salt_val = salt or secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_val.encode("utf-8"), 100_000)
+    return dk.hex(), salt_val
+
+
+def verify_password(password: str, expected_hash: str, salt: str) -> bool:
+    actual_hash, _ = hash_password(password, salt)
+    return hmac.compare_digest(actual_hash, expected_hash)
+
+
+def create_token(user_id: int) -> str:
+    exp = int(time.time()) + TOKEN_TTL_SECONDS
+    payload = f"{user_id}:{exp}".encode("utf-8")
+    b64_payload = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    sig = hmac.new(AUTH_SECRET, b64_payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{b64_payload}.{sig}"
+
+
+def verify_token(token: str) -> int | None:
+    try:
+        b64_payload, sig = token.split(".", 1)
+        expected_sig = hmac.new(AUTH_SECRET, b64_payload.encode("ascii"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        padded = b64_payload + "=" * (-len(b64_payload) % 4)
+        uid_str, exp_str = base64.urlsafe_b64decode(padded).decode("utf-8").split(":", 1)
+        if int(exp_str) < int(time.time()):
+            return None
+        return int(uid_str)
+    except Exception:
+        return None
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """
+    Повертає авторизованого User, якщо передано валідний заголовок Authorization: Bearer <token>.
+    Якщо токен не передано — повертає None (анонімний контекст House.user_id IS NULL).
+    Якщо токен передано, але він недійсний — кидає 401.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Некоректний формат токена")
+    token = auth_header[7:].strip()
+    user_id = verify_token(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Сесія застаріла або недійсна. Увійдіть знову.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Користувача не знайдено")
+    return user
+
+
+def get_user_house(db: Session, house_id: int, user: User | None) -> House:
+    """Шукає будинок виключно серед будинків поточного користувача."""
+    cond = House.user_id == user.id if user is not None else House.user_id.is_(None)
+    house = db.query(House).filter(House.id == house_id, cond).first()
+    if not house:
+        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    return house
 
 
 # ---------- Спільний валідатор розкладу годин (0..23) ----------
@@ -201,6 +275,24 @@ class HouseUpdate(BaseModel):
 class PresetRequest(BaseModel):
     """Запит на застосування швидкого сценарію для будинку."""
     preset: str = Field(..., pattern="^(workday|weekend|winter|summer|eco)$")
+
+
+class RegisterRequest(BaseModel):
+    """Реєстрація нового користувача."""
+    name: str = Field(..., min_length=1, max_length=100)
+    username: str = Field(..., min_length=2, max_length=60)
+    password: str = Field(..., min_length=4, max_length=100)
+
+
+class LoginRequest(BaseModel):
+    """Вхід у власний акаунт."""
+    username: str = Field(..., min_length=2, max_length=60)
+    password: str = Field(..., min_length=1, max_length=100)
+
+
+class ProfileUpdateRequest(BaseModel):
+    """Оновлення імені користувача."""
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class AddApplianceRequest(BaseModel):
@@ -387,14 +479,17 @@ def run_optimization(request: SimulationRequest):
 
 
 @app.post("/api/houses/{house_id}/optimize")
-def optimize_house_in_db(house_id: int, apply: bool = False, db: Session = Depends(get_db)):
+def optimize_house_in_db(
+    house_id: int,
+    apply: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
     """
     Розраховує (або одразу застосовує при apply=true) оптимізований розклад
     для всіх увімкнених приладів будинку в БД.
     """
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    house = get_user_house(db, house_id, current_user)
 
     appliances_dicts = []
     for ha in house.appliances:
@@ -437,19 +532,92 @@ def optimize_house_in_db(house_id: int, apply: bool = False, db: Session = Depen
     return opt
 
 
-# --- 3. Будинки (CRUD у БД) ---
+# --- 2c. АУТЕНТИФІКАЦІЯ ТА ОСОБИСТІ ПРОФІЛІ ---
+def _serialize_user(user: User) -> dict:
+    return {"id": user.id, "name": user.name, "username": user.username}
+
+
+@app.post("/api/auth/register")
+def register_user(data: RegisterRequest, db: Session = Depends(get_db)):
+    """Реєструє нового користувача та створює для нього особистий стартовий будинок."""
+    uname = data.username.strip().lower()
+    if not uname:
+        raise HTTPException(status_code=400, detail="Введіть коректний логін")
+    if db.query(User).filter(User.username == uname).first():
+        raise HTTPException(status_code=409, detail="Такий логін вже зайнятий. Оберіть інший або увійдіть.")
+
+    pwd_hash, salt = hash_password(data.password)
+    user = User(
+        username=uname,
+        name=data.name.strip(),
+        password_hash=pwd_hash,
+        salt=salt,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    seed_default_house(db, user_id=user.id, house_name=f"Будинок ({user.name})")
+    token = create_token(user.id)
+    return {"token": token, "user": _serialize_user(user)}
+
+
+@app.post("/api/auth/login")
+def login_user(data: LoginRequest, db: Session = Depends(get_db)):
+    """Вхід у власний акаунт."""
+    uname = data.username.strip().lower()
+    user = db.query(User).filter(User.username == uname).first()
+    if not user or not verify_password(data.password, user.password_hash, user.salt):
+        raise HTTPException(status_code=401, detail="Невірний логін або пароль")
+    token = create_token(user.id)
+    return {"token": token, "user": _serialize_user(user)}
+
+
+@app.get("/api/auth/me")
+def get_me(current_user: User | None = Depends(get_current_user)):
+    """Повертає дані поточного авторизованого користувача."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Потрібна авторизація")
+    return _serialize_user(current_user)
+
+
+@app.put("/api/auth/me")
+def update_me(
+    data: ProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Оновлює ім'я поточного користувача в БД."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Потрібна авторизація")
+    current_user.name = data.name.strip()
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_user(current_user)
+
+
+# --- 3. Будинки (CRUD у БД, ізольовані по користувачах) ---
 @app.get("/api/houses")
-def list_houses(db: Session = Depends(get_db)):
-    """Список усіх будинків разом із їхніми приладами."""
-    houses = db.query(House).order_by(House.id).all()
+def list_houses(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Список будинків поточного користувача разом із їхніми приладами."""
+    cond = House.user_id == current_user.id if current_user is not None else House.user_id.is_(None)
+    houses = db.query(House).filter(cond).order_by(House.id).all()
     return [serialize_house(h) for h in houses]
 
 
 @app.post("/api/houses")
-def create_house(data: HouseCreate, db: Session = Depends(get_db)):
-    """Створює новий будинок у БД."""
+def create_house(
+    data: HouseCreate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Створює новий будинок у БД для поточного користувача."""
     max_power = data.max_power_watt if data.max_power_watt is not None else (data.voltage * data.amps)
     house = House(
+        user_id=current_user.id if current_user is not None else None,
         name=data.name.strip(),
         address=data.address.strip(),
         voltage=data.voltage,
@@ -466,11 +634,14 @@ def create_house(data: HouseCreate, db: Session = Depends(get_db)):
 
 
 @app.put("/api/houses/{house_id}")
-def update_house(house_id: int, data: HouseUpdate, db: Session = Depends(get_db)):
+def update_house(
+    house_id: int,
+    data: HouseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
     """Оновлює параметри будинку, тарифи, графік відключень або ліміт автомата."""
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    house = get_user_house(db, house_id, current_user)
 
     if data.name is not None:
         house.name = data.name.strip()
@@ -498,11 +669,13 @@ def update_house(house_id: int, data: HouseUpdate, db: Session = Depends(get_db)
 
 
 @app.delete("/api/houses/{house_id}")
-def delete_house(house_id: int, db: Session = Depends(get_db)):
+def delete_house(
+    house_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
     """Видаляє будинок та його прилади з БД."""
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    house = get_user_house(db, house_id, current_user)
     db.delete(house)
     db.commit()
     return {"deleted": house_id}
@@ -514,11 +687,10 @@ def add_appliance_to_house(
     house_id: int,
     data: AddApplianceRequest,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Додає прилад з каталогу до будинку."""
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    get_user_house(db, house_id, current_user)
 
     catalog_item = db.query(ApplianceCatalog).filter(ApplianceCatalog.id == data.catalog_id).first()
     if not catalog_item:
@@ -545,8 +717,10 @@ def update_house_appliance(
     appliance_id: int,
     data: UpdateApplianceRequest,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Оновлює прилад будинку (розклад, кількість, увімкнено/вимкнено, потужність)."""
+    get_user_house(db, house_id, current_user)
     appliance = (
         db.query(HouseAppliance)
         .filter(HouseAppliance.id == appliance_id, HouseAppliance.house_id == house_id)
@@ -588,8 +762,10 @@ def delete_house_appliance(
     house_id: int,
     appliance_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Видаляє прилад із будинку."""
+    get_user_house(db, house_id, current_user)
     appliance = (
         db.query(HouseAppliance)
         .filter(HouseAppliance.id == appliance_id, HouseAppliance.house_id == house_id)
@@ -603,13 +779,20 @@ def delete_house_appliance(
 
 
 @app.post("/api/reset")
-def reset_database(db: Session = Depends(get_db)):
-    """Скидає всі будинки та прилади у БД до початкового стану."""
-    db.query(HouseAppliance).delete()
-    db.query(House).delete()
+def reset_database(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Скидає будинки та прилади поточного користувача до початкового стану."""
+    cond = House.user_id == current_user.id if current_user is not None else House.user_id.is_(None)
+    user_houses = db.query(House).filter(cond).all()
+    for uh in user_houses:
+        db.delete(uh)
     db.commit()
-    seed_default_house(db)
-    houses = db.query(House).order_by(House.id).all()
+    uid = current_user.id if current_user is not None else None
+    hname = f"Будинок ({current_user.name})" if current_user is not None else "Мій будинок"
+    seed_default_house(db, user_id=uid, house_name=hname)
+    houses = db.query(House).filter(cond).order_by(House.id).all()
     return [serialize_house(h) for h in houses]
 
 
@@ -655,11 +838,14 @@ HOUSE_PRESETS: dict[str, list[tuple[str, list[int], int, str | None, float | Non
 
 
 @app.post("/api/houses/{house_id}/preset")
-def apply_house_preset(house_id: int, data: PresetRequest, db: Session = Depends(get_db)):
+def apply_house_preset(
+    house_id: int,
+    data: PresetRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
     """Завантажує готовий сценарій набору приладів та розкладу для будинку."""
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    house = get_user_house(db, house_id, current_user)
 
     catalog_by_name = {c.name: c for c in db.query(ApplianceCatalog).all()}
     db.query(HouseAppliance).filter(HouseAppliance.house_id == house_id).delete()
@@ -684,11 +870,13 @@ def apply_house_preset(house_id: int, data: PresetRequest, db: Session = Depends
 
 
 @app.get("/api/houses/{house_id}/simulate")
-def simulate_house(house_id: int, db: Session = Depends(get_db)):
+def simulate_house(
+    house_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
     """Симулює споживання для всіх увімкнених приладів конкретного будинку з БД."""
-    house = db.query(House).filter(House.id == house_id).first()
-    if not house:
-        raise HTTPException(status_code=404, detail="Будинок не знайдено")
+    house = get_user_house(db, house_id, current_user)
 
     appliance_inputs = []
     for ha in house.appliances:

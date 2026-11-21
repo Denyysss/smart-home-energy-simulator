@@ -301,7 +301,10 @@
           <div class="card">
             <b>👤 Профіль</b>
             <p class="muted" id="sProfile"></p>
-            <button class="btn-g" onclick="openProfileForm()">Змінити ім'я</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-g" onclick="openProfileForm()">Змінити ім'я</button>
+              <button class="btn-r" onclick="logoutUser()">🚪 Вийти з акаунта</button>
+            </div>
           </div>
           <div class="card">
             <b>🕒 Тарифи</b>
@@ -373,6 +376,32 @@
 </div>
 <div class="toast" id="toast"></div>
 <div id="printReport" class="print-report"></div>
+
+<!-- ===== ЕКРАН ВХОДУ ТА РЕЄСТРАЦІЇ ===== -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-box">
+    <div class="auth-logo">⚡ <b>ЕнергіяДім</b></div>
+    <p class="auth-sub">Увійдіть або створіть особистий кабінет — кожен користувач бачить лише свої будинки та розрахунки.</p>
+    <div class="auth-tabs">
+      <button type="button" id="authTabLogin" class="active" onclick="switchAuthTab('login')">🔑 Вхід</button>
+      <button type="button" id="authTabReg" onclick="switchAuthTab('register')">✨ Реєстрація</button>
+    </div>
+    <form id="authForm" onsubmit="submitAuth(event)">
+      <div id="authNameWrap" style="display:none">
+        <label class="f-l" for="authName">Ваше ім'я</label>
+        <input class="f-i" id="authName" placeholder="Наприклад: Олександр" autocomplete="name">
+      </div>
+      <label class="f-l" for="authUser">Логін</label>
+      <input class="f-i" id="authUser" placeholder="Наприклад: alex2026" required autocomplete="username">
+      <label class="f-l" for="authPass">Пароль</label>
+      <input class="f-i" id="authPass" type="password" placeholder="Мінімум 4 символи" required autocomplete="current-password">
+      <div class="auth-err" id="authErr" style="display:none"></div>
+      <button type="submit" class="btn-y" id="authSubmitBtn" style="width:100%;margin-top:16px">Увійти</button>
+    </form>
+    <div class="auth-divider">або</div>
+    <button type="button" class="btn-g" style="width:100%" onclick="quickDemoLogin()">⚡ Швидкий демо-акаунт (1 клік)</button>
+  </div>
+</div>
 
 <script src="script.js"></script>
 </body>
