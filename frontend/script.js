@@ -419,6 +419,7 @@ async function runSim() {
         max_power_watt: limitOf(h),
         day_rate: h.dayRate,
         night_rate: h.nightRate,
+        outage_hours: h.outageHours || h.outage_hours || [],
     };
     try {
         sim = await apiFetch("/api/simulate", { method: "POST", body: JSON.stringify(body) });
@@ -506,6 +507,8 @@ function renderData() {
     $("tCount").textContent = h.appliances.filter(a => a.enabled).length + "/" + h.appliances.length;
     $("eventsList").innerHTML = eventsHtml();
     renderAnalytics(h, dk, nk);
+    renderMeterAndSolar();
+    renderOutagePanel(h);
     renderExtras(h, dk, nk);
     drawAll();
     setupScrollMotion();
@@ -569,7 +572,8 @@ function drawBase() {
     document.querySelectorAll(".legend2").forEach(e => e.innerHTML = `<span><i style="background:#22C55E"></i>День (${h.dayRate} грн)</span><span><i style="background:#818CF8"></i>Ніч (${h.nightRate} грн)</span>`);
     if (!sim) return;
     const L = limitOf(h), ymax = state.settings.chartMax;
-    const tip = { callbacks: { label: c => `${fmt(c.parsed.y, 0)} Вт`, afterLabel: c => (NIGHT.has(c.dataIndex) ? "🌙 Ніч" : "☀️ День") } };
+    const outSet = new Set(sim.outage_hours || h.outageHours || []);
+    const tip = { callbacks: { label: c => `${fmt(c.parsed.y, 0)} Вт`, afterLabel: c => outSet.has(c.dataIndex) ? "🕯️ Відключення світла (ГПВ)" : (NIGHT.has(c.dataIndex) ? "🌙 Ніч" : "☀️ День") } };
     const hourlyCfg = () => ({ type: "bar", data: { labels: L24, datasets: [{ data: sim.hourly_watt, backgroundColor: hourColors(), borderRadius: 3, barPercentage: .75 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, annotation: { annotations: limitAnn(L) }, tooltip: tip }, scales: axes("Вт", ymax) } });
     mkChart("chartHome", hourlyCfg());
@@ -631,12 +635,16 @@ function renderShellExtras(h) {
         <div class="kpi"><div class="kpi-ic b">⚡</div><div class="kpi-v">${fmt(inst / 1000, 1)} кВт</div><div class="kpi-l">встановлена потужність</div></div>
         <div class="kpi"><div class="kpi-ic p">📊</div><div class="kpi-v">${fmt(e.kwh, 1)}</div><div class="kpi-l">кВт·год за добу (оцінка)</div></div>`;
     const load = hourlyLoad(h), mx = Math.max(1, ...load);
+    const outSet = new Set(h.outageHours || h.outage_hours || []);
     $("timeline").innerHTML = h.appliances.length
         ? `<div class="tl-h"><span></span><div>${L24.map((l, i) => `<span>${i % 3 === 0 ? i : ""}</span>`).join("")}</div></div>` +
-          h.appliances.map(a => `<div class="tl-r" style="${a.enabled ? "" : "opacity:.4"}"><span class="tl-n">${iconOf(a)} ${esc(a.name)}</span><div class="tl-c">${L24.map((l, i) =>
-              `<i class="${a.schedule.includes(i) ? (NIGHT.has(i) ? "n" : "d") : ""}" title="${l}"></i>`).join("")}</div></div>`).join("") +
+          h.appliances.map((a, appIdx) => `<div class="tl-r" style="${a.enabled ? "" : "opacity:.4"}"><span class="tl-n">${iconOf(a)} ${esc(a.name)}</span><div class="tl-c">${L24.map((l, i) => {
+              const on = a.schedule.includes(i);
+              const cls = (on ? (NIGHT.has(i) ? "n" : "d") : "") + (outSet.has(i) ? " out" : "");
+              return `<i data-tl-app="${appIdx}" data-tl-hr="${i}" class="${cls.trim()}" title="${esc(a.name)} — ${l} (${on ? "увімкнено" : "вимкнено"}${outSet.has(i) ? ", ГПВ" : ""}). Клікніть для перемикання"></i>`;
+          }).join("")}</div></div>`).join("") +
           `<div class="tl-r"><span class="tl-n"><b>Σ Потужність</b></span><div class="tl-c">${load.map((w, i) =>
-              `<i title="${L24[i]}: ${fmt(w, 0)} Вт" style="background:rgba(239,68,68,${(0.12 + 0.88 * w / mx).toFixed(2)})"></i>`).join("")}</div></div>`
+              `<i title="${L24[i]}: ${outSet.has(i) ? "0 Вт (відключення ГПВ)" : fmt(w, 0) + " Вт"}" style="background:${outSet.has(i) ? "rgba(239,68,68,.2)" : "rgba(239,68,68," + (0.12 + 0.88 * w / mx).toFixed(2) + ")"}"></i>`).join("")}</div></div>`
         : `<div class="empty">Додайте прилади, щоб побачити розклад</div>`;
     $("gallery").innerHTML = catalog.length ? catalog.map(c => `<button onclick="openApplianceForm(undefined, ${c.id})"><i>${ICONS[c.name] || CAT_ICON[c.category] || "🔌"}</i><b>${esc(c.name)}</b><small>${c.power_watt} Вт${c.is_cyclic ? " • цикл " + Math.round(c.duty_cycle * 100) + "%" : ""}</small></button>`).join("")
         : `<div class="empty">Каталог недоступний (перевірте бекенд)</div>`;
@@ -724,6 +732,7 @@ async function fetchOptimization() {
         max_power_watt: limitOf(h),
         day_rate: h.dayRate,
         night_rate: h.nightRate,
+        outage_hours: h.outageHours || h.outage_hours || [],
     };
     return await apiFetch("/api/optimize", { method: "POST", body: JSON.stringify(body) });
 }
@@ -868,6 +877,166 @@ if (scEl && progEl) {
 }
 
 // ============================================================
+// 10. ГПВ (ВІДКЛЮЧЕННЯ + ECOFLOW), ПРЕСЕТИ, ОКУПНІСТЬ ТА PDF-ЗВІТ
+// ============================================================
+const OUTAGE_QUEUES = {
+    none: [],
+    q1: [8, 9, 10, 11, 20, 21, 22, 23],
+    q2: [0, 1, 2, 3, 12, 13, 14, 15],
+    q3: [4, 5, 6, 7, 16, 17, 18, 19],
+};
+
+function renderOutagePanel(h) {
+    const outArr = (sim && sim.outage_hours) ? sim.outage_hours : (h.outageHours || h.outage_hours || []);
+    const outSet = new Set(outArr);
+
+    $("outageGrid").innerHTML = L24.map((l, hr) =>
+        `<button type="button" class="outage-hour ${outSet.has(hr) ? "off" : ""}" onclick="toggleOutageHour(${hr})" title="Година ${l}">${String(hr).padStart(2, "0")}:00</button>`
+    ).join("");
+
+    const bk = sim && sim.outage_backup;
+    if (!bk || outSet.size === 0) {
+        $("outageStats").innerHTML = `<small class="muted" style="margin:6px 0 0">Оберіть години відключення вище або чергу ГПВ, щоб розрахувати необхідну зарядну станцію (EcoFlow / інвертор).</small>`;
+        return;
+    }
+
+    const affectedHtml = (bk.affected_appliances || []).length
+        ? `<div class="opt-changes">${bk.affected_appliances.map(a =>
+            `<div class="opt-change-row"><b>${esc(a.name)}</b><span>Без світла: ${shortHours(a.blocked_hours)} • потрібно <b>${fmt(a.needed_wh, 0)} Вт·год</b></span></div>`
+        ).join("")}</div>`
+        : `<small class="muted" style="margin:8px 0 0">У вибрані години відключень жоден увімкнений прилад не запланований.</small>`;
+
+    $("outageStats").innerHTML = `
+        <div class="stats">
+            <div class="stat"><b>${bk.outage_hours_count} год</b><small>без світла за добу</small></div>
+            <div class="stat"><b style="color:var(--o)">${fmt(bk.unserved_kwh, 2)} кВт·год</b><small>випадає за добу (${fmt(bk.unserved_wh, 0)} Вт·год)</small></div>
+            <div class="stat"><b style="color:var(--b)">${bk.recommended_wh} Вт·год</b><small>потрібна ємність (+20% запас)</small></div>
+            <div class="stat"><b style="color:var(--y)">${bk.recommended_inverter_watt} Вт</b><small>потрібна потужність інвертора</small></div>
+        </div>
+        <div class="ecoflow-box">
+            <div>
+                <small class="muted" style="margin:0">Рекомендована зарядна станція / інвертор</small>
+                <div class="ecoflow-model">🔋 ${esc(bk.recommended_model)}</div>
+            </div>
+            <button class="btn-y sm" onclick="previewOptimization(true)">✨ Перенести прилади з годин відключень</button>
+        </div>
+        ${affectedHtml}`;
+}
+
+async function saveOutageHours(hoursArr) {
+    const h = activeHouse();
+    const cleaned = [...new Set(hoursArr)].sort((a, b) => a - b);
+    h.outageHours = cleaned;
+    h.outage_hours = cleaned;
+    try {
+        const updated = await apiFetch(`/api/houses/${h.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ outage_hours: cleaned }),
+        });
+        Object.assign(h, updated);
+    } catch (e) {
+        toast("⚠️ " + e.message);
+    }
+    await refresh();
+}
+
+async function toggleOutageHour(hr) {
+    const h = activeHouse();
+    const cur = new Set(h.outageHours || h.outage_hours || []);
+    cur.has(hr) ? cur.delete(hr) : cur.add(hr);
+    await saveOutageHours([...cur]);
+}
+
+async function setOutageQueue(qKey) {
+    const hrs = OUTAGE_QUEUES[qKey] || [];
+    addEvent("info", "🕯️ Змінено графік ГПВ", hrs.length ? `Обрано ${hrs.length} год відключень` : "Відключення вимкнено");
+    await saveOutageHours(hrs);
+    toast(hrs.length ? `Застосовано графік ГПВ (${hrs.length} год)` : "Відключення прибрано");
+}
+
+async function applyPreset(presetKey) {
+    const h = activeHouse();
+    const names = { workday: "Робочий день", weekend: "Вихідний", winter: "Зима (Обігрів)", summer: "Літо (Кондиціонер)", eco: "Еко-ніч" };
+    try {
+        const updated = await apiFetch(`/api/houses/${h.id}/preset`, {
+            method: "POST",
+            body: JSON.stringify({ preset: presetKey }),
+        });
+        Object.assign(h, updated);
+        addEvent("ok", "🎬 Завантажено сценарій", names[presetKey] || presetKey);
+        await refresh();
+        toast(`🎬 Застосовано сценарій: ${names[presetKey] || presetKey}`);
+    } catch (e) {
+        toast("⚠️ Не вдалося завантажити сценарій: " + e.message);
+    }
+}
+
+function renderMeterAndSolar() {
+    if (!sim || !sim.tariff_comparison) return;
+    const tc = sim.tariff_comparison;
+    const mx = Math.max(tc.monthly_1zone, tc.monthly_2zone, tc.monthly_3zone, 1);
+    const pb = tc.payback_months_2zone !== null
+        ? `Окупність двозонного лічильника (~${fmt(tc.meter_cost_uah, 0)} грн): <b style="color:var(--g)">${tc.payback_months_2zone} міс.</b> (економія <b>${fmt(tc.monthly_save_2zone, 0)} грн/міс</b>)`
+        : `Економія двозонного тарифу поки мінімальна — перенесіть частину навантаження на ніч (23:00–07:00).`;
+
+    $("aMeterCard").innerHTML = `
+        <small class="muted">Порівняння місячних витрат за 1-зонним, 2-зонним та 3-зонним обліком.</small>
+        <div class="rowbar"><span>1-зонний</span><span class="tr"><i style="width:${(tc.monthly_1zone / mx * 100).toFixed(0)}%;background:#EF4444"></i></span><span>${fmt(tc.monthly_1zone, 0)} грн/міс</span></div>
+        <div class="rowbar"><span>2-зонний (ніч 50%)</span><span class="tr"><i style="width:${(tc.monthly_2zone / mx * 100).toFixed(0)}%;background:#FACC15"></i></span><span>${fmt(tc.monthly_2zone, 0)} грн/міс</span></div>
+        <div class="rowbar"><span>3-зонний</span><span class="tr"><i style="width:${(tc.monthly_3zone / mx * 100).toFixed(0)}%;background:#38BDF8"></i></span><span>${fmt(tc.monthly_3zone, 0)} грн/міс</span></div>
+        <div class="tip" style="margin-top:10px;border-top:1px solid var(--bd);border-bottom:none">📟 ${pb}</div>`;
+
+    const yrSave = tc.solar_1_5kw_monthly_save_uah * 12;
+    $("aSolarCard").innerHTML = `
+        <small class="muted">Оцінка покриття денного навантаження (08:00–17:00) сонячною панеллю 1.5 кВт.</small>
+        <div class="stats">
+            <div class="stat"><b style="color:var(--y)">${fmt(tc.solar_1_5kw_daily_covered_kwh, 2)} кВт·год</b><small>покриває СЕС за добу</small></div>
+            <div class="stat"><b style="color:var(--g)">${fmt(tc.solar_1_5kw_monthly_save_uah, 0)} грн</b><small>економія за місяць</small></div>
+            <div class="stat"><b style="color:var(--b)">${fmt(yrSave, 0)} грн</b><small>економія за рік</small></div>
+        </div>`;
+}
+
+function downloadPdfReport() {
+    if (!sim) { toast("⚠️ Немає даних для звіту"); return; }
+    const h = activeHouse();
+    const tc = sim.tariff_comparison || {};
+    const bk = sim.outage_backup || {};
+    const nowStr = new Date().toLocaleString("uk-UA");
+    const rows = (window._rows || []).map(r =>
+        `<tr><td>${esc(r.name)}</td><td>${fmt(r.power, 0)} Вт</td><td>${fmt(r.kwh, 2)} кВт·год</td><td>${fmt(r.cost, 2)} грн</td><td>${fmt(r.cost * 30, 0)} грн</td></tr>`
+    ).join("");
+
+    $("printReport").innerHTML = `
+        <h1>⚡ Паспорт енергоспоживання будинку — «${esc(h.name)}»</h1>
+        <div class="pr-meta">Адреса: ${esc(h.address || "—")} • Власник: ${esc(state.profile.name)} • Сформовано: ${nowStr}</div>
+        <div class="pr-kpis">
+            <div class="pr-kpi"><b>${fmt(sim.total_kwh)} кВт·год</b><span>Споживання за добу</span></div>
+            <div class="pr-kpi"><b>${fmt(sim.total_cost)} грн</b><span>Вартість за добу</span></div>
+            <div class="pr-kpi"><b>${fmt(sim.peak_watt, 0)} / ${limitOf(h)} Вт</b><span>Пік (о ${sim.peak_hour}:00) / Ліміт</span></div>
+            <div class="pr-kpi"><b>${fmt((tc.monthly_2zone ?? sim.total_cost * 30), 0)} грн/міс</b><span>Прогноз (2-зонний тариф)</span></div>
+        </div>
+        <h2>1. Параметри електромережі та тарифів</h2>
+        <table>
+            <tr><th>Напруга</th><th>Автомат</th><th>Ліміт потужності</th><th>Тариф день / ніч</th><th>Перевантаження</th></tr>
+            <tr><td>${h.voltage} В</td><td>${h.amps} А</td><td>${limitOf(h)} Вт</td><td>${h.dayRate} / ${h.nightRate} грн</td><td>${sim.overload_hours.length ? sim.overload_hours.map(o => o.hour + ":00").join(", ") : "Немає"}</td></tr>
+        </table>
+        <h2>2. Структура споживання по приладах</h2>
+        <table>
+            <tr><th>Прилад</th><th>Потужність</th><th>кВт·год/доба</th><th>грн/доба</th><th>грн/міс</th></tr>
+            ${rows || "<tr><td colspan='5'>Немає увімкнених приладів</td></tr>"}
+        </table>
+        <h2>3. Окупність лічильників, СЕС та резервне живлення</h2>
+        <table>
+            <tr><th>Показник</th><th>Значення</th></tr>
+            <tr><td>Місячний чек (1-зонний / 2-зонний / 3-зонний)</td><td>${fmt(tc.monthly_1zone || 0, 0)} / ${fmt(tc.monthly_2zone || 0, 0)} / ${fmt(tc.monthly_3zone || 0, 0)} грн</td></tr>
+            <tr><td>Окупність 2-зонного лічильника (~2000 грн)</td><td>${tc.payback_months_2zone ? tc.payback_months_2zone + " міс." : "—"}</td></tr>
+            <tr><td>Покриття від сонячної панелі 1.5 кВт</td><td>${fmt(tc.solar_1_5kw_daily_covered_kwh || 0, 2)} кВт·год/доба (${fmt(tc.solar_1_5kw_monthly_save_uah || 0, 0)} грн/міс)</td></tr>
+            <tr><td>Графік відключень (ГПВ) та EcoFlow</td><td>${(sim.outage_hours || []).length ? `${sim.outage_hours.length} год (${shortHours(sim.outage_hours)}) → ${esc(bk.recommended_model || "")}` : "Відключення не задано"}</td></tr>
+        </table>`;
+    window.print();
+}
+
+// ============================================================
 // СТАРТ
 // ============================================================
 document.querySelectorAll(".nav-item").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
@@ -878,6 +1047,35 @@ $("searchInput").addEventListener("input", () => { renderShell(); if (!$("view-h
 $("rangePills").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     range = b.dataset.r; document.querySelectorAll("#rangePills button").forEach(x => x.classList.toggle("active", x === b)); drawAll();
+});
+$("timeline").addEventListener("click", async e => {
+    const cell = e.target.closest("[data-tl-hr]");
+    if (!cell) return;
+    const appIdx = +cell.dataset.tlApp;
+    const hr = +cell.dataset.tlHr;
+    const h = activeHouse();
+    const a = h.appliances[appIdx];
+    if (!a) return;
+    const set = new Set(a.schedule);
+    if (set.has(hr)) {
+        if (set.size <= 1) { toast("⚠️ Залиште хоча б одну годину або вимкніть прилад тумблером"); return; }
+        set.delete(hr);
+    } else {
+        set.add(hr);
+    }
+    const newSched = [...set].sort((x, y) => x - y);
+    a.schedule = newSched;
+    renderShellExtras(h);
+    try {
+        const updated = await apiFetch(`/api/houses/${h.id}/appliances/${a.id}`, {
+            method: "PUT",
+            body: JSON.stringify({ schedule: newSched }),
+        });
+        h.appliances[appIdx] = updated;
+    } catch (err) {
+        toast("⚠️ " + err.message);
+    }
+    await refresh();
 });
 window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
 setView(location.hash.slice(1) || "home");

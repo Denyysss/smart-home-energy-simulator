@@ -68,6 +68,7 @@ class House(Base):
     max_power_watt  = Column(Float, nullable=False, default=3680.0)
     day_rate        = Column(Float, nullable=False, default=4.32)
     night_rate      = Column(Float, nullable=False, default=2.16)
+    outage_hours    = Column(Text,  nullable=False, default="[]")
 
     appliances = relationship(
         "HouseAppliance",
@@ -119,6 +120,7 @@ def _ensure_columns():
             ("amps", "FLOAT DEFAULT 16.0"),
             ("day_rate", "FLOAT DEFAULT 4.32"),
             ("night_rate", "FLOAT DEFAULT 2.16"),
+            ("outage_hours", "TEXT DEFAULT '[]'"),
         ],
         "house_appliances": [
             ("custom_power", "FLOAT"),

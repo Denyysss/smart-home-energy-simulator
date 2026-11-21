@@ -58,17 +58,13 @@ def _recommend_station_model(wh: float, inverter_w: float) -> str:
     """Підбирає рекомендований клас зарядної станції за ємністю (Вт·год) та потужністю (Вт)."""
     if wh <= 0:
         return "Резервне живлення не потрібне (0 Вт·год у години відключень)"
-    if wh <= 500 and inverter_w <= 600:
-        return "EcoFlow RIVER 2 Max (512 Вт·год / 500 Вт)"
     if wh <= 800 and inverter_w <= 800:
         return "EcoFlow RIVER 2 Pro (768 Вт·год / 800 Вт)"
-    if wh <= 1100 and inverter_w <= 1800:
+    if wh <= 1200 and inverter_w <= 1800:
         return "EcoFlow DELTA 2 (1024 Вт·год / 1800 Вт)"
-    if wh <= 2100 and inverter_w <= 2400:
-        return "EcoFlow DELTA 2 Max (2048 Вт·год / 2400 Вт)"
     if wh <= 3600 and inverter_w <= 3600:
         return "EcoFlow DELTA Pro (3600 Вт·год / 3600 Вт)"
-    return f"Гібридний інвертор 5 кВт + LiFePO4 акумулятор {max(5, round(wh / 1000, 1))} кВт·год"
+    return f"Гібридний інвертор 5 кВт + LiFePO4 ({max(5, round(wh / 1000, 1))} кВт·год)"
 
 
 def simulate(
@@ -296,7 +292,8 @@ def optimize_schedule(
         eff_power = a["power_watt"] * a.get("duty_cycle", 1.0) * a.get("quantity", 1)
 
         is_all_day = len(sched) >= 20
-        if not is_all_day and is_shiftable(a["name"]):
+        hits_outage = any(h in outage_set for h in sched)
+        if not is_all_day and (is_shiftable(a["name"]) or hits_outage):
             flexible_indices.append((idx, eff_power, len(sched)))
             optimized_list.append({**a, "new_schedule": []})
         else:

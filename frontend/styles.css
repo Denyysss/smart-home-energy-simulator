@@ -256,4 +256,45 @@ body[data-page="settings"]{
   to{opacity:1;transform:translate3d(0,0,0)}
 }
 
-@media(max-width:860px){.rowbar{grid-template-columns:90px 1fr 56px}.tl-r,.tl-h{grid-template-columns:70px 1fr}}
+/* Пресети сценаріїв */
+.preset-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.preset-chip{background:var(--inp);border:1px solid var(--bd2);border-radius:10px;padding:8px 13px;font-size:.8rem;font-weight:600;color:var(--t2);transition:.15s}
+.preset-chip:hover{border-color:var(--theme-1);color:var(--theme-1);transform:translateY(-1px)}
+
+/* Симулятор ГПВ (відключення світла) + EcoFlow */
+.outage-card{border-color:rgba(249,115,22,.28)}
+.queue-pills{display:flex;gap:6px;flex-wrap:wrap}
+.sm-btn{padding:6px 11px;font-size:.74rem;border-radius:8px}
+.sm-pdf{padding:7px 12px;font-size:.78rem;border-radius:9px}
+.outage-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:5px;margin-top:14px}
+.outage-hour{padding:7px 2px;border-radius:8px;border:1px solid var(--bd);background:var(--inp);color:var(--t2);font-size:.72rem;font-weight:600;text-align:center;transition:.12s}
+.outage-hour:hover{border-color:var(--o);color:var(--t)}
+.outage-hour.off{background:rgba(239,68,68,.22);border-color:var(--r);color:#FCA5A5}
+.outage-stats{margin-top:14px}
+.ecoflow-box{background:var(--inp);border:1px solid rgba(56,189,248,.3);border-radius:12px;padding:14px 16px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.ecoflow-model{font-size:1rem;font-weight:700;color:var(--b)}
+
+/* Інтерактивна матриця розкладу 24×N */
+.tl-c i[data-tl-hr]{cursor:pointer;transition:transform .1s,opacity .15s}
+.tl-c i[data-tl-hr]:hover{transform:scaleY(1.22);outline:1px solid var(--t)}
+.tl-c i.out{background:repeating-linear-gradient(-45deg,rgba(239,68,68,.25),rgba(239,68,68,.25) 3px,transparent 3px,transparent 6px);border:1px solid rgba(239,68,68,.45)}
+
+/* Паспорт енергоспоживання (PDF-друк) */
+.print-report{display:none}
+@media print{
+  body{background:#fff!important;color:#111!important;padding:0!important}
+  .ambient-bg,.layout,.overlay,.toast{display:none!important}
+  .print-report{display:block!important;padding:24px;font-family:'Segoe UI',system-ui,sans-serif;color:#111}
+  .print-report h1{font-size:20pt;margin-bottom:4px;color:#0F172A}
+  .print-report h2{font-size:13pt;margin:18px 0 8px;border-bottom:2px solid #CBD5E1;padding-bottom:4px;color:#0F172A}
+  .print-report .pr-meta{color:#475569;font-size:10pt;margin-bottom:16px}
+  .print-report .pr-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+  .print-report .pr-kpi{border:1px solid #CBD5E1;border-radius:8px;padding:10px}
+  .print-report .pr-kpi b{display:block;font-size:13pt;color:#0F172A}
+  .print-report .pr-kpi span{font-size:8.5pt;color:#475569}
+  .print-report table{width:100%;border-collapse:collapse;font-size:9.5pt;margin-top:8px}
+  .print-report th,.print-report td{border:1px solid #CBD5E1;padding:6px 8px;text-align:left;color:#111}
+  .print-report th{background:#F1F5F9;font-weight:700}
+}
+
+@media(max-width:860px){.rowbar{grid-template-columns:90px 1fr 56px}.tl-r,.tl-h{grid-template-columns:70px 1fr}.outage-grid{grid-template-columns:repeat(6,1fr)}.sm-pdf{display:none}}

@@ -238,3 +238,40 @@ def test_smart_optimizer_shifts_to_night_and_eliminates_overload():
         assert data["after"]["total_cost"] < data["before"]["total_cost"]
         assert data["saved_monthly_uah"] > 500
 
+
+def test_outage_hours_and_ecoflow_sizing():
+    """Перевірка розрахунку відключень (ГПВ), підбору EcoFlow та окупності лічильника/СЕС."""
+    appliances = [
+        ApplianceInput(name="Холодильник", power_watt=150, schedule=list(range(24)), is_cyclic=True, duty_cycle=0.35),
+        ApplianceInput(name="Комп'ютер (ПК)", power_watt=350, schedule=[10, 11, 12, 13]),
+        ApplianceInput(name="Бойлер", power_watt=2000, schedule=[6, 7]),
+    ]
+    res = simulate(appliances, max_power_watt=3680, day_rate=4.32, night_rate=2.16, outage_hours=[10, 11, 12])
+    assert res.outage_hours == [10, 11, 12]
+    # За 3 години відключення: (52.5 + 350) * 3 = 1207.5 Вт·год (1.208 кВт·год)
+    assert res.outage_backup["unserved_kwh"] == pytest.approx(1.208, abs=0.01)
+    # Рекомендована ємність із +20% запасу = 1449 Вт·год, інвертор = 503 Вт -> DELTA Pro
+    assert res.outage_backup["recommended_wh"] > 1200
+    assert res.outage_backup["recommended_inverter_watt"] > 400
+    assert "EcoFlow" in res.outage_backup["recommended_model"]
+    assert res.hourly_watt[10] == 0.0  # Під час відключення мережеве споживання 0
+    assert res.tariff_comparison["payback_months_2zone"] is not None
+    assert res.tariff_comparison["solar_1_5kw_monthly_save_uah"] > 0
+
+
+def test_house_preset_endpoint():
+    """Перевірка POST /api/houses/{id}/preset для швидких сценаріїв."""
+    with TestClient(app) as client:
+        r_house = client.post("/api/houses", json={"name": "Пресет-тест", "address": "вул. Тестова"})
+        assert r_house.status_code == 200
+        hid = r_house.json()["id"]
+
+        try:
+            for preset_name, expected_sub in [("winter", "Обігрівач"), ("summer", "Кондиціонер"), ("eco", "Бойлер")]:
+                r_p = client.post(f"/api/houses/{hid}/preset", json={"preset": preset_name})
+                assert r_p.status_code == 200
+                names = [a["name"] for a in r_p.json()["appliances"]]
+                assert any(expected_sub in n for n in names)
+        finally:
+            assert client.delete(f"/api/houses/{hid}").status_code == 200
+
