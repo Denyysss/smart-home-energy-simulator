@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>⚡ ЕнергіяДім — Контроль твоїх витрат</title>
+<meta name="color-scheme" content="dark light">
+<title>ЕнергіяДім — Контроль твоїх витрат</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <link rel="stylesheet" href="styles.css">
@@ -19,18 +25,24 @@
 
   <!-- ===== LEFT SIDEBAR / NAV ===== -->
   <aside class="sidebar">
-    <div class="brand"><span>⚡</span><span class="brand-name">ЕнергіяДім</span></div>
+    <div class="brand">
+      <span class="brand-logo"><i data-lucide="zap"></i></span>
+      <span class="brand-name">ЕнергіяДім</span>
+    </div>
     <div class="brand-sub">Контроль твоїх витрат</div>
     <nav>
-      <button class="nav-item" data-view="home"><i>🏠</i><span>Головна</span></button>
-      <button class="nav-item" data-view="houses"><i>🏢</i><span>Будинки</span></button>
-      <button class="nav-item" data-view="appliances"><i>🔌</i><span>Прилади</span></button>
-      <button class="nav-item" data-view="charts"><i>📊</i><span>Графіки</span></button>
-      <button class="nav-item" data-view="analytics"><i>📈</i><span>Аналітика</span></button>
-      <button class="nav-item" data-view="settings"><i>⚙️</i><span>Налаштування</span></button>
+      <button class="nav-item active" data-view="home"><i><i data-lucide="home"></i></i><span>Головна</span></button>
+      <button class="nav-item" data-view="houses"><i><i data-lucide="building-2"></i></i><span>Будинки</span></button>
+      <button class="nav-item" data-view="appliances"><i><i data-lucide="plug-zap"></i></i><span>Прилади</span></button>
+      <button class="nav-item" data-view="charts"><i><i data-lucide="bar-chart-3"></i></i><span>Графіки</span></button>
+      <button class="nav-item" data-view="analytics"><i><i data-lucide="trending-up"></i></i><span>Аналітика</span></button>
+      <button class="nav-item" data-view="settings"><i><i data-lucide="settings"></i></i><span>Налаштування</span></button>
     </nav>
     <div class="sp"></div>
-    <div class="eco"><div>🌿</div><p>Разом до енергоефективності!</p></div>
+    <div class="eco">
+      <div class="eco-ic"><i data-lucide="leaf"></i></div>
+      <p>Разом до енергоефективності!</p>
+    </div>
   </aside>
 
   <!-- ===== CENTER ===== -->
@@ -39,62 +51,232 @@
     <header class="topbar">
       <div>
         <h1 id="pageTitle">Головна</h1>
-        <p id="pageSub"></p>
+        <p id="pageSub">Огляд споживання вашого будинку</p>
       </div>
       <div class="top-right">
-        <div class="search"><span>🔍</span><input id="searchInput" placeholder="Пошук будинку..."></div>
-        <button class="btn-g sm-pdf" onclick="downloadPdfReport()" title="Сформувати паспорт енергоспоживання у PDF">🖨️ PDF-звіт</button>
-        <button class="icon-btn" id="bellBtn" title="Події">🔔<b class="badge" id="bellBadge">0</b></button>
+        <div class="search">
+          <i data-lucide="search"></i>
+          <input id="searchInput" placeholder="Пошук будинку...">
+        </div>
+        <button class="btn-g sm-pdf btn-ic" onclick="downloadPdfReport()" title="Сформувати паспорт енергоспоживання у PDF">
+          <i data-lucide="printer"></i><span>PDF-звіт</span>
+        </button>
+        <button class="icon-btn" id="bellBtn" title="Події">
+          <i data-lucide="bell"></i><b class="badge zero" id="bellBadge">0</b>
+        </button>
         <button class="profile" id="profileBtn" title="Змінити профіль">
-          <span class="avatar" id="avatar">А</span><span id="profileName">Артем</span><small>▾</small>
+          <span class="avatar" id="avatar">А</span>
+          <span id="profileName">Артем</span>
+          <i data-lucide="chevron-down" class="chev"></i>
         </button>
       </div>
     </header>
 
     <div class="content">
-      <div class="banner err" id="apiErr" style="display:none">⚠️ Бекенд недоступний. Запустіть: <code>python -m uvicorn main:app --port 8000</code></div>
+      <div class="banner err" id="apiErr" style="display:none">
+        <div class="inline-ic"><i data-lucide="alert-triangle"></i> <span>Бекенд недоступний. Запустіть: <code>python -m uvicorn main:app --port 8000</code></span></div>
+      </div>
 
       <!-- ===== VIEW: HOME ===== -->
-      <section class="view" id="view-home">
-        <div class="hero">
-          <div>
-            <span class="status"><i class="dot"></i> Онлайн</span>
-            <h2 id="heroName">Мій будинок</h2>
-            <p id="heroAddr">📍</p>
+      <section class="view active" id="view-home">
+
+        <!-- ВЕРХНЯ СІТКА: КАРТКА БУДИНКУ ЗЛІВА + KPI ТА НАВАНТАЖЕННЯ СПРАВА -->
+        <div class="home-top-grid">
+          <div class="hero house-showcase">
+            <div class="hs-top">
+              <span class="status"><i class="dot"></i> Онлайн</span>
+              <button class="hs-action" onclick="openHouseForm(activeHouse())" title="Редагувати будинок">
+                <i data-lucide="sliders-horizontal"></i>
+              </button>
+            </div>
+
+            <div class="house-art-wrap" aria-hidden="true">
+              <svg class="house-iso-svg" viewBox="0 0 360 230" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="yardGlow" cx="50%" cy="55%" r="50%">
+                    <stop offset="0%" stop-color="#FACC15" stop-opacity="0.28"/>
+                    <stop offset="55%" stop-color="#38BDF8" stop-opacity="0.1"/>
+                    <stop offset="100%" stop-color="#0B1120" stop-opacity="0"/>
+                  </radialGradient>
+                  <linearGradient id="winWarm" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#FEF08A"/>
+                    <stop offset="100%" stop-color="#F59E0B"/>
+                  </linearGradient>
+                  <linearGradient id="roofGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#334155"/>
+                    <stop offset="100%" stop-color="#1E293B"/>
+                  </linearGradient>
+                  <linearGradient id="wallLight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#293956"/>
+                    <stop offset="100%" stop-color="#1A263D"/>
+                  </linearGradient>
+                  <linearGradient id="wallDark" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#19243B"/>
+                    <stop offset="100%" stop-color="#101829"/>
+                  </linearGradient>
+                  <linearGradient id="lawnGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#172A3A"/>
+                    <stop offset="100%" stop-color="#0E1A2B"/>
+                  </linearGradient>
+                </defs>
+
+                <ellipse cx="180" cy="135" rx="155" ry="82" fill="url(#yardGlow)"/>
+                <polygon points="180,46 322,124 180,206 38,124" fill="url(#lawnGrad)" stroke="#38BDF8" stroke-opacity="0.22" stroke-width="1.5"/>
+                <polygon points="180,54 310,124 180,198 50,124" fill="none" stroke="#FACC15" stroke-opacity="0.08" stroke-width="1"/>
+
+                <polygon points="154,158 176,170 132,194 110,182" fill="#24344D" stroke="#475569" stroke-opacity="0.35"/>
+                <line x1="143" y1="165" x2="165" y2="177" stroke="#94A3B8" stroke-opacity="0.25" stroke-width="2"/>
+                <line x1="131" y1="172" x2="153" y2="184" stroke="#94A3B8" stroke-opacity="0.25" stroke-width="2"/>
+                <line x1="119" y1="179" x2="141" y2="191" stroke="#94A3B8" stroke-opacity="0.25" stroke-width="2"/>
+
+                <polygon points="205,112 268,146 268,176 205,142" fill="url(#wallLight)" stroke="#475569" stroke-opacity="0.4"/>
+                <polygon points="268,146 302,127 302,157 268,176" fill="url(#wallDark)" stroke="#334155" stroke-opacity="0.5"/>
+                <polygon points="205,112 239,93 302,127 268,146" fill="url(#roofGrad)" stroke="#64748B" stroke-opacity="0.45"/>
+                <polygon points="218,126 256,147 256,169 218,148" fill="#0F172A" stroke="#38BDF8" stroke-opacity="0.35"/>
+                <line x1="218" y1="133" x2="256" y2="154" stroke="#334155" stroke-width="1.2"/>
+                <line x1="218" y1="140" x2="256" y2="161" stroke="#334155" stroke-width="1.2"/>
+
+                <polygon points="102,94 185,140 185,186 102,140" fill="url(#wallLight)" stroke="#475569" stroke-opacity="0.45"/>
+                <polygon points="185,140 236,112 236,158 185,186" fill="url(#wallDark)" stroke="#334155" stroke-opacity="0.5"/>
+
+                <polygon points="114,122 138,135 138,155 114,142" fill="url(#winWarm)"/>
+                <polygon points="148,141 174,155 174,179 148,165" fill="url(#winWarm)"/>
+                <polygon points="196,150 222,136 222,154 196,168" fill="url(#winWarm)" opacity="0.88"/>
+
+                <polygon points="97,92 185,141 241,110 153,62" fill="#334155" stroke="#64748B" stroke-opacity="0.5"/>
+
+                <polygon points="108,64 185,106 185,138 108,96" fill="url(#wallLight)" stroke="#475569" stroke-opacity="0.45"/>
+                <polygon points="185,106 232,80 232,112 185,138" fill="url(#wallDark)" stroke="#334155" stroke-opacity="0.5"/>
+
+                <polygon points="118,77 144,91 144,110 118,96" fill="url(#winWarm)"/>
+                <polygon points="152,95 176,108 176,127 152,114" fill="url(#winWarm)"/>
+                <polygon points="195,107 221,93 221,110 195,124" fill="url(#winWarm)" opacity="0.85"/>
+
+                <polygon points="102,62 153,34 238,80 185,108" fill="url(#roofGrad)" stroke="#94A3B8" stroke-opacity="0.45" stroke-width="1.2"/>
+                <polygon points="136,56 164,41 206,64 178,79" fill="#0C2442" stroke="#38BDF8" stroke-opacity="0.65" stroke-width="1.2"/>
+                <line x1="150" y1="48.5" x2="192" y2="71.5" stroke="#38BDF8" stroke-opacity="0.45" stroke-width="1"/>
+                <line x1="157" y1="67.5" x2="185" y2="52.5" stroke="#38BDF8" stroke-opacity="0.45" stroke-width="1"/>
+
+                <circle cx="76" cy="118" r="11" fill="#134E4A" stroke="#2DD4BF" stroke-opacity="0.35"/>
+                <circle cx="84" cy="112" r="8" fill="#115E59"/>
+                <circle cx="282" cy="108" r="10" fill="#134E4A" stroke="#2DD4BF" stroke-opacity="0.35"/>
+                <circle cx="192" cy="193" r="3" fill="#FACC15"/>
+                <circle cx="192" cy="193" r="8" fill="#FACC15" fill-opacity="0.22"/>
+                <circle cx="102" cy="176" r="2.5" fill="#FACC15"/>
+                <circle cx="102" cy="176" r="7" fill="#FACC15" fill-opacity="0.2"/>
+              </svg>
+            </div>
+
+            <div class="hs-footer" onclick="openHouseSwitch()" title="Натисніть, щоб перемкнути будинок">
+              <div class="hs-f-ic"><i data-lucide="home"></i></div>
+              <div class="grow">
+                <h2 id="heroName">Мій будинок</h2>
+                <p id="heroAddr" class="inline-ic"><i data-lucide="map-pin"></i> <span>—</span></p>
+              </div>
+              <i data-lucide="chevron-right" class="chev"></i>
+            </div>
           </div>
-          <div class="hero-emoji">🏠</div>
+
+          <div class="home-top-right">
+            <div class="kpis">
+              <div class="kpi">
+                <div class="kpi-ic y"><i data-lucide="zap"></i></div>
+                <div class="kpi-v num" id="kKwh">—</div>
+                <div class="kpi-l">кВт·год за добу</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-ic b"><i data-lucide="wallet"></i></div>
+                <div class="kpi-v num" id="kCost">—</div>
+                <div class="kpi-l">грн за добу</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-ic p"><i data-lucide="clock"></i></div>
+                <div class="kpi-v num" id="kSplit">—</div>
+                <div class="kpi-l">день / ніч, кВт·год</div>
+              </div>
+            </div>
+
+            <div class="card load-card">
+              <div class="row-between">
+                <b>Поточне навантаження</b>
+                <span class="pill ok" id="gBadge">Нормальне</span>
+              </div>
+              <div class="bar"><div class="bar-fill" id="gBar"></div></div>
+              <small class="muted" id="gText" style="margin:0"></small>
+            </div>
+          </div>
         </div>
 
-        <div class="kpis">
-          <div class="kpi"><div class="kpi-ic y">⚡</div><div class="kpi-v" id="kKwh">—</div><div class="kpi-l">кВт·год за добу</div></div>
-          <div class="kpi"><div class="kpi-ic b">💰</div><div class="kpi-v" id="kCost">—</div><div class="kpi-l">грн за добу</div></div>
-          <div class="kpi"><div class="kpi-ic p">🕒</div><div class="kpi-v" id="kSplit">—</div><div class="kpi-l">день / ніч, кВт·год</div></div>
-        </div>
-
-        <div class="card">
-          <div class="row-between"><b>Поточне навантаження</b><span class="pill ok" id="gBadge">🟢 Нормальне</span></div>
-          <div class="bar"><div class="bar-fill" id="gBar"></div></div>
-          <small class="muted" id="gText"></small>
-        </div>
-
+        <!-- БАНЕРИ СТАТУСУ ТА ПЕРЕВАНТАЖЕННЯ -->
         <div class="banner over" id="overBanner" style="display:none">
-          <div>⚠️ <b id="overText"></b></div>
+          <div class="inline-ic"><i data-lucide="alert-octagon"></i> <b id="overText"></b></div>
           <small>Розведіть потужні прилади по різних годинах або скористайтесь авто-оптимізатором.</small><br>
-          <button class="btn-y sm" onclick="previewOptimization(true)">✨ Оптимізувати розклад</button>
+          <button class="btn-y sm btn-ic" onclick="previewOptimization(true)"><i data-lucide="sparkles"></i><span>Оптимізувати розклад</span></button>
           <button class="btn-g sm" onclick="setView('charts')" style="margin-left:8px;padding:7px 14px">Переглянути графік</button>
         </div>
         <div class="banner okb" id="okBanner" style="display:none"></div>
+
+        <!-- СЕРЕДНЯ СІТКА: ШВИДКІ ДІЇ ЗЛІВА + ГРАФІК СПОЖИВАННЯ СПРАВА -->
+        <div class="home-mid-grid">
+          <div class="card quick-panel">
+            <b class="inline-ic"><i data-lucide="zap" class="ic-y"></i> Швидкі дії</b>
+            <div class="quick vertical">
+              <button onclick="openApplianceForm()"><i><i data-lucide="plus"></i></i><span>Додати прилад</span></button>
+              <button onclick="openHouseForm(activeHouse())"><i><i data-lucide="pencil"></i></i><span>Редагувати будинок</span></button>
+              <button onclick="setView('charts')"><i><i data-lucide="bar-chart-3"></i></i><span>Переглянути графіки</span></button>
+              <button onclick="setView('analytics')"><i><i data-lucide="clock"></i></i><span>Аналітика витрат</span></button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="row-between">
+              <b class="inline-ic"><i data-lucide="bar-chart-2" class="ic-b"></i> Споживання електроенергії по годинах</b>
+            </div>
+            <div class="chart-h"><canvas id="chartHome"></canvas></div>
+            <div class="legend"></div>
+          </div>
+        </div>
+
+        <!-- НИЖНЯ СІТКА: ОСТАННІ ПОДІЇ ЗЛІВА + ЗА СЬОГОДНІ СПРАВА -->
+        <div class="home-bot-grid">
+          <div class="card">
+            <b class="inline-ic"><i data-lucide="bell" class="ic-p"></i> Останні події</b>
+            <div id="eventsList"></div>
+          </div>
+
+          <div class="card today-panel">
+            <b class="inline-ic"><i data-lucide="calendar-check" class="ic-g"></i> За сьогодні</b>
+            <div class="today vertical">
+              <div class="today-row">
+                <i class="ic-box y"><i data-lucide="home"></i></i>
+                <div class="grow"><b class="num" id="tKwh">—</b><small>кВт·год • Загальне споживання</small></div>
+              </div>
+              <div class="today-row">
+                <i class="ic-box b"><i data-lucide="banknote"></i></i>
+                <div class="grow"><b class="num" id="tCost">—</b><small>грн • Вартість за добу</small></div>
+              </div>
+              <div class="today-row">
+                <i class="ic-box o"><i data-lucide="activity"></i></i>
+                <div class="grow"><b class="num" id="tPeak">—</b><small>Вт • Пікове навантаження</small></div>
+              </div>
+              <div class="today-row">
+                <i class="ic-box p"><i data-lucide="plug"></i></i>
+                <div class="grow"><b class="num" id="tCount">—</b><small>Активні прилади</small></div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- ===== КАРТКА РОЗУМНОГО ОПТИМІЗАТОРА ===== -->
         <div class="card opt-card" id="optCard">
           <div class="row-between" style="flex-wrap:wrap;gap:12px">
             <div>
-              <b>✨ Розумний оптимізатор розкладу</b>
+              <b class="inline-ic"><i data-lucide="sparkles" class="ic-y"></i> Розумний оптимізатор розкладу</b>
               <small class="muted" style="margin:4px 0 0">Переносить гнучкі потужні прилади (бойлер, пральна машина, посудомийка, зарядка авто) на нічний тариф (23:00–07:00) без перевантажень автомата.</small>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn-y" id="btnRunOpt" onclick="previewOptimization(true)">✨ Оптимізувати розклад</button>
-              <button class="btn-ok" id="btnApplyOpt" onclick="applyOptimization()" style="display:none">✅ Застосувати</button>
+              <button class="btn-y btn-ic" id="btnRunOpt" onclick="previewOptimization(true)"><i data-lucide="sparkles"></i><span>Оптимізувати розклад</span></button>
+              <button class="btn-ok btn-ic" id="btnApplyOpt" onclick="applyOptimization()" style="display:none"><i data-lucide="check-circle-2"></i><span>Застосувати</span></button>
             </div>
           </div>
           <div class="opt-result" id="optResult" style="display:none">
@@ -106,15 +288,15 @@
         <!-- ===== ШВИДКІ СЦЕНАРІЇ В 1 КЛІК (ПРЕСЕТИ) ===== -->
         <div class="card">
           <div class="row-between" style="flex-wrap:wrap;gap:8px">
-            <b>🎬 Швидкі сценарії в 1 клік (Пресети)</b>
+            <b class="inline-ic"><i data-lucide="sliders-horizontal" class="ic-b"></i> Швидкі сценарії в 1 клік (Пресети)</b>
             <small class="muted" style="margin:0">Миттєве завантаження готового профілю споживання</small>
           </div>
           <div class="preset-bar">
-            <button class="preset-chip" onclick="applyPreset('workday')">🏢 Робочий день</button>
-            <button class="preset-chip" onclick="applyPreset('weekend')">🛋️ Вихідний</button>
-            <button class="preset-chip" onclick="applyPreset('winter')">❄️ Зима (Обігрів)</button>
-            <button class="preset-chip" onclick="applyPreset('summer')">☀️ Літо (Кондиціонер)</button>
-            <button class="preset-chip" onclick="applyPreset('eco')">🌿 Еко-ніч</button>
+            <button class="preset-chip btn-ic" onclick="applyPreset('workday')"><i data-lucide="briefcase"></i><span>Робочий день</span></button>
+            <button class="preset-chip btn-ic" onclick="applyPreset('weekend')"><i data-lucide="sofa"></i><span>Вихідний</span></button>
+            <button class="preset-chip btn-ic" onclick="applyPreset('winter')"><i data-lucide="snowflake"></i><span>Зима (Обігрів)</span></button>
+            <button class="preset-chip btn-ic" onclick="applyPreset('summer')"><i data-lucide="sun"></i><span>Літо (Кондиціонер)</span></button>
+            <button class="preset-chip btn-ic" onclick="applyPreset('eco')"><i data-lucide="leaf"></i><span>Еко-ніч</span></button>
           </div>
         </div>
 
@@ -122,14 +304,14 @@
         <div class="card outage-card" id="outageCard">
           <div class="row-between" style="flex-wrap:wrap;gap:10px">
             <div>
-              <b>🕯️ Симулятор відключень світла (ГПВ) + Калькулятор EcoFlow / інвертора</b>
+              <b class="inline-ic"><i data-lucide="power-off" class="ic-o"></i> Симулятор відключень світла (ГПВ) + Калькулятор EcoFlow / інвертора</b>
               <small class="muted" style="margin:4px 0 0">Позначте години без світла або оберіть чергу ГПВ — система порахує втрачену енергію та підбере зарядну станцію.</small>
             </div>
             <div class="queue-pills">
-              <button class="btn-g sm-btn" onclick="setOutageQueue('none')">🟢 Без відключень</button>
-              <button class="btn-g sm-btn" onclick="setOutageQueue('q1')">⚡ Черга 1 (08–12, 20–24)</button>
-              <button class="btn-g sm-btn" onclick="setOutageQueue('q2')">⚡ Черга 2 (12–16, 00–04)</button>
-              <button class="btn-g sm-btn" onclick="setOutageQueue('q3')">⚡ Черга 3 (16–20, 04–08)</button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('none')"><i data-lucide="check-circle"></i><span>Без відключень</span></button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q1')"><i data-lucide="zap-off"></i><span>Черга 1 (08–12, 20–24)</span></button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q2')"><i data-lucide="zap-off"></i><span>Черга 2 (12–16, 00–04)</span></button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q3')"><i data-lucide="zap-off"></i><span>Черга 3 (16–20, 04–08)</span></button>
             </div>
           </div>
           <div class="outage-grid" id="outageGrid"></div>
@@ -137,33 +319,8 @@
         </div>
 
         <div class="grid2">
-          <div class="card"><b>🏆 Топ споживачів</b><div id="topList"></div></div>
-          <div class="card"><b>🌗 День / ніч</b><div class="chart-h" style="height:210px"><canvas id="chartDN"></canvas></div></div>
-        </div>
-        <h3 class="sec">Швидкі дії</h3>
-        <div class="quick">
-          <button onclick="openApplianceForm()"><i>➕</i>Додати прилад</button>
-          <button onclick="openHouseForm(activeHouse())"><i>✏️</i>Редагувати будинок</button>
-          <button onclick="setView('charts')"><i>📊</i>Переглянути графіки</button>
-          <button onclick="setView('analytics')"><i>🕒</i>Аналітика витрат</button>
-        </div>
-
-        <div class="card">
-          <div class="row-between"><b>📊 Споживання електроенергії по годинах</b></div>
-          <div class="chart-h"><canvas id="chartHome"></canvas></div>
-          <div class="legend"></div>
-        </div>
-
-        <div class="card">
-          <b>🔔 Останні події</b>
-          <div id="eventsList"></div>
-        </div>
-
-        <div class="today">
-          <div class="card c"><i>🏠</i><b id="tKwh">—</b><small>кВт·год</small></div>
-          <div class="card c"><i>💰</i><b id="tCost">—</b><small>грн</small></div>
-          <div class="card c"><i>📈</i><b id="tPeak">—</b><small>пік, Вт</small></div>
-          <div class="card c"><i>🔌</i><b id="tCount">—</b><small>прилади увімк.</small></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="award" class="ic-y"></i> Топ споживачів</b><div id="topList"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="sun-moon" class="ic-p"></i> День / ніч</b><div class="chart-h" style="height:210px"><canvas id="chartDN"></canvas></div></div>
         </div>
       </section>
 
@@ -171,63 +328,93 @@
       <section class="view" id="view-houses">
         <div class="page-hero houses-hero">
           <div>
-            <span class="page-tag">🏢 АРХІТЕКТУРА ТА ОБ'ЄКТИ</span>
+            <span class="page-tag"><i data-lucide="building-2"></i> АРХІТЕКТУРА ТА ОБ'ЄКТИ</span>
             <h2>Керування будинками</h2>
             <p>Порівнюйте квартири, дачі та офіси з індивідуальними лімітами автоматів і тарифами</p>
           </div>
           <div style="display:flex;align-items:center;gap:14px">
-            <button class="btn-y" onclick="openHouseForm()">+ Додати будинок</button>
-            <span class="page-hero-icon">🏘️</span>
+            <button class="btn-y btn-ic" onclick="openHouseForm()"><i data-lucide="plus"></i><span>Додати будинок</span></button>
+            <div class="hero-badge"><i data-lucide="building-2"></i></div>
           </div>
         </div>
-        <div class="card"><b>⚖️ Порівняння будинків (оцінка за добу)</b><div class="chart-h" style="height:220px"><canvas id="chartHouses"></canvas></div></div>
-        <div id="housesList" class="grid2"></div>
-      </section>
 
+        <div class="houses-mid-grid">
+          <div class="card">
+            <b class="inline-ic"><i data-lucide="scale" class="ic-b"></i> Порівняння будинків (оцінка за добу)</b>
+            <div class="chart-h" style="height:220px"><canvas id="chartHouses"></canvas></div>
+          </div>
+
+          <div class="card houses-guide">
+            <b class="inline-ic"><i data-lucide="shield-check" class="ic-g"></i> Стандарти ввідних автоматів</b>
+            <small class="muted" style="margin:6px 0 10px">Рекомендовані ліміти потужності для різних типів житла (230 В):</small>
+            <div class="today vertical">
+              <div class="today-row">
+                <i class="ic-box b"><i data-lucide="building"></i></i>
+                <div class="grow"><b>16 А • 3 680 Вт</b><small>Стандартна квартира (газова плита)</small></div>
+              </div>
+              <div class="today-row">
+                <i class="ic-box y"><i data-lucide="home"></i></i>
+                <div class="grow"><b>25 А • 5 750 Вт</b><small>Приватний будинок / квартира з електроплитою</small></div>
+              </div>
+              <div class="today-row">
+                <i class="ic-box p"><i data-lucide="zap"></i></i>
+                <div class="grow"><b>32–40 А • 7 360–9 200 Вт</b><small>Котедж з електроопаленням або зарядкою EV</small></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row-between">
+          <b class="sec inline-ic"><i data-lucide="map-pinned" class="ic-y"></i> Ваші об'єкти нерухомості</b>
+          <button class="btn-g sm-btn btn-ic" onclick="openHouseForm()"><i data-lucide="plus"></i><span>Новий об'єкт</span></button>
+        </div>
+
+        <div id="housesList" class="grid2 houses-smart-grid"></div>
+      </section>
       <!-- ===== VIEW: APPLIANCES ===== -->
       <section class="view" id="view-appliances">
         <div class="page-hero appliances-hero">
           <div>
-            <span class="page-tag">🔌 ЕНЕРГОВУЗЛИ ТА РОЗКЛАД</span>
+            <span class="page-tag"><i data-lucide="plug-zap"></i> ЕНЕРГОВУЗЛИ ТА РОЗКЛАД</span>
             <h2 id="appTitle">Прилади</h2>
             <p>Налаштовуйте години роботи, потужність та циклічність кожного приладу</p>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <button class="btn-g" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button>
-            <button class="btn-y" onclick="openApplianceForm()">+ Додати прилад</button>
+            <button class="btn-g btn-ic" onclick="openOptimizeModal()"><i data-lucide="sparkles"></i><span>Оптимізувати розклад</span></button>
+            <button class="btn-y btn-ic" onclick="openApplianceForm()"><i data-lucide="plus"></i><span>Додати прилад</span></button>
           </div>
         </div>
         <div class="kpis" id="appSum"></div>
         <div class="card" style="padding:14px 18px">
           <div class="row-between" style="flex-wrap:wrap;gap:8px">
-            <b>🎬 Швидкі сценарії в 1 клік (Пресети)</b>
+            <b class="inline-ic"><i data-lucide="sliders-horizontal" class="ic-p"></i> Швидкі сценарії в 1 клік (Пресети)</b>
             <div class="preset-bar" style="margin-top:0">
-              <button class="preset-chip" onclick="applyPreset('workday')">🏢 Робочий день</button>
-              <button class="preset-chip" onclick="applyPreset('weekend')">🛋️ Вихідний</button>
-              <button class="preset-chip" onclick="applyPreset('winter')">❄️ Зима (Обігрів)</button>
-              <button class="preset-chip" onclick="applyPreset('summer')">☀️ Літо (Кондиціонер)</button>
-              <button class="preset-chip" onclick="applyPreset('eco')">🌿 Еко-ніч</button>
+              <button class="preset-chip btn-ic" onclick="applyPreset('workday')"><i data-lucide="briefcase"></i><span>Робочий день</span></button>
+              <button class="preset-chip btn-ic" onclick="applyPreset('weekend')"><i data-lucide="sofa"></i><span>Вихідний</span></button>
+              <button class="preset-chip btn-ic" onclick="applyPreset('winter')"><i data-lucide="snowflake"></i><span>Зима (Обігрів)</span></button>
+              <button class="preset-chip btn-ic" onclick="applyPreset('summer')"><i data-lucide="sun"></i><span>Літо (Кондиціонер)</span></button>
+              <button class="preset-chip btn-ic" onclick="applyPreset('eco')"><i data-lucide="leaf"></i><span>Еко-ніч</span></button>
             </div>
           </div>
         </div>
         <div id="appGrid" class="grid2"></div>
-        <div class="card"><b>🗓️ Інтерактивна матриця розкладу 24×N (клікніть по клітинці, щоб увімкнути/вимкнути годину)</b><small class="muted">Жовтий — день, фіолетовий — ніч, сірий — вимкнено, штрих — відключення світла (ГПВ). Нижній рядок — сумарна потужність.</small><div id="timeline"></div></div>
-        <div class="card"><b>📚 Каталог приладів</b><small class="muted">Натисніть на прилад, щоб додати його до будинку.</small><div id="gallery" class="gal"></div></div>
+        <div class="card"><b class="inline-ic"><i data-lucide="calendar-clock" class="ic-y"></i> Інтерактивна матриця розкладу 24×N (клікніть по клітинці, щоб увімкнути/вимкнути годину)</b><small class="muted">Жовтий — день, фіолетовий — ніч, сірий — вимкнено, штрих — відключення світла (ГПВ). Нижній рядок — сумарна потужність.</small><div id="timeline"></div></div>
+        <div class="card"><b class="inline-ic"><i data-lucide="layout-grid" class="ic-b"></i> Каталог приладів</b><small class="muted">Натисніть на прилад, щоб додати його до будинку.</small><div id="gallery" class="gal"></div></div>
       </section>
 
       <!-- ===== VIEW: CHARTS ===== -->
       <section class="view" id="view-charts">
         <div class="page-hero charts-hero">
           <div>
-            <span class="page-tag">📊 ТЕЛЕМЕТРІЯ ТА МОНІТОРИНГ</span>
+            <span class="page-tag"><i data-lucide="activity"></i> ТЕЛЕМЕТРІЯ ТА МОНІТОРИНГ</span>
             <h2>Візуалізація навантаження</h2>
             <p>Погодинний профіль потужності, пікові зони, вартість та декомпозиція по приладах</p>
           </div>
-          <span class="page-hero-icon">📈</span>
+          <div class="hero-badge"><i data-lucide="bar-chart-3"></i></div>
         </div>
         <div class="card">
           <div class="row-between">
-            <b>📊 Споживання</b>
+            <b class="inline-ic"><i data-lucide="bar-chart-2" class="ic-y"></i> Споживання</b>
             <div class="pills" id="rangePills">
               <button data-r="day" class="active">День</button>
               <button data-r="week">Тиждень</button>
@@ -239,107 +426,109 @@
           <div class="legend"></div>
         </div>
         <div class="card">
-          <b>💰 Вартість по годинах</b>
+          <b class="inline-ic"><i data-lucide="banknote" class="ic-g"></i> Вартість по годинах</b>
           <div class="chart-h"><canvas id="chartCost"></canvas></div>
           <div class="legend2"></div>
         </div>
         <div class="card">
-          <b>🧱 Внесок кожного приладу (по годинах)</b>
+          <b class="inline-ic"><i data-lucide="layers" class="ic-p"></i> Внесок кожного приладу (по годинах)</b>
           <div class="chart-h tall"><canvas id="chartStack"></canvas></div>
         </div>
         <div class="grid2">
-          <div class="card"><b>📈 Профіль навантаження і ліміт</b><div class="chart-h"><canvas id="chartLine"></canvas></div></div>
-          <div class="card"><b>🧾 Накопичена вартість за добу</b><div class="chart-h"><canvas id="chartCum"></canvas></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="trending-up" class="ic-b"></i> Профіль навантаження і ліміт</b><div class="chart-h"><canvas id="chartLine"></canvas></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="receipt" class="ic-g"></i> Накопичена вартість за добу</b><div class="chart-h"><canvas id="chartCum"></canvas></div></div>
         </div>
       </section>
-        <!-- extra charts -->
+
       <!-- ===== VIEW: ANALYTICS ===== -->
       <section class="view" id="view-analytics">
         <div class="page-hero analytics-hero">
           <div>
-            <span class="page-tag">🌿 ЕНЕРГОЕФЕКТИВНІСТЬ ТА ЕКОНОМІЯ</span>
+            <span class="page-tag"><i data-lucide="leaf"></i> ЕНЕРГОЕФЕКТИВНІСТЬ ТА ЕКОНОМІЯ</span>
             <h2>Глибока аналітика витрат</h2>
             <p>Місячний та річний прогноз, потенціал нічного тарифу та екологічний слід CO₂</p>
           </div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <button class="btn-y" onclick="downloadPdfReport()">🖨️ Завантажити PDF-звіт</button>
-            <span class="page-hero-icon">🌱</span>
+            <button class="btn-y btn-ic" onclick="downloadPdfReport()"><i data-lucide="printer"></i><span>Завантажити PDF-звіт</span></button>
+            <div class="hero-badge"><i data-lucide="sprout"></i></div>
           </div>
         </div>
         <div class="kpis">
-          <div class="kpi"><div class="kpi-ic y">📅</div><div class="kpi-v" id="aMonthKwh">—</div><div class="kpi-l">кВт·год / місяць (прогноз)</div></div>
-          <div class="kpi"><div class="kpi-ic b">💳</div><div class="kpi-v" id="aMonthCost">—</div><div class="kpi-l">грн / місяць (прогноз)</div></div>
-          <div class="kpi"><div class="kpi-ic p">🌙</div><div class="kpi-v" id="aSave">—</div><div class="kpi-l">економія, якщо перенести день→ніч</div></div>
+          <div class="kpi"><div class="kpi-ic y"><i data-lucide="calendar"></i></div><div class="kpi-v num" id="aMonthKwh">—</div><div class="kpi-l">кВт·год / місяць (прогноз)</div></div>
+          <div class="kpi"><div class="kpi-ic b"><i data-lucide="credit-card"></i></div><div class="kpi-v num" id="aMonthCost">—</div><div class="kpi-l">грн / місяць (прогноз)</div></div>
+          <div class="kpi"><div class="kpi-ic p"><i data-lucide="moon"></i></div><div class="kpi-v num" id="aSave">—</div><div class="kpi-l">економія, якщо перенести день→ніч</div></div>
         </div>
         <div class="grid2">
-          <div class="card"><b>🍩 Частка приладів у споживанні</b><div class="chart-h"><canvas id="chartShare"></canvas></div></div>
-          <div class="card"><b>📋 Витрати по приладах</b><div id="aTable"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="pie-chart" class="ic-y"></i> Частка приладів у споживанні</b><div class="chart-h"><canvas id="chartShare"></canvas></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="table" class="ic-b"></i> Витрати по приладах</b><div id="aTable"></div></div>
         </div>
         <div class="grid2">
-          <div class="card"><b>📟 Окупність лічильника (1 / 2 / 3 зони)</b><div id="aMeterCard"></div></div>
-          <div class="card"><b>☀️ Сонячна панель 1.5 кВт (СЕС)</b><div id="aSolarCard"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="gauge" class="ic-p"></i> Окупність лічильника (1 / 2 / 3 зони)</b><div id="aMeterCard"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="sun" class="ic-y"></i> Сонячна панель 1.5 кВт (СЕС)</b><div id="aSolarCard"></div></div>
         </div>
         <div class="grid2">
-          <div class="card"><b>⏰ Найвигідніший час для потужних приладів</b><div id="aBest"></div></div>
-          <div class="card"><b>⚖️ Порівняння тарифів</b><div id="aTariff"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="clock" class="ic-g"></i> Найвигідніший час для потужних приладів</b><div id="aBest"></div></div>
+          <div class="card"><b class="inline-ic"><i data-lucide="scale" class="ic-b"></i> Порівняння тарифів</b><div id="aTariff"></div></div>
         </div>
-        <div class="card"><b>🌿 Еко-показники</b><div id="aEco" class="stats"></div></div>
-        <div class="card"><b>💡 Поради</b><div id="aTips"></div></div>
+        <div class="card"><b class="inline-ic"><i data-lucide="leaf" class="ic-g"></i> Еко-показники</b><div id="aEco" class="stats"></div></div>
+        <div class="card"><b class="inline-ic"><i data-lucide="lightbulb" class="ic-y"></i> Поради</b><div id="aTips"></div></div>
       </section>
 
       <!-- ===== VIEW: SETTINGS ===== -->
       <section class="view" id="view-settings">
         <div class="page-hero settings-hero">
           <div>
-            <span class="page-tag">⚙️ КОНФІГУРАЦІЯ СИСТЕМИ</span>
+            <span class="page-tag"><i data-lucide="settings"></i> КОНФІГУРАЦІЯ СИСТЕМИ</span>
             <h2>Центр керування та налаштувань</h2>
             <p>Тарифи, автомати захисту, візуалізація графіків та резервне копіювання даних</p>
           </div>
-          <span class="page-hero-icon">🎛️</span>
+          <div class="hero-badge"><i data-lucide="sliders"></i></div>
         </div>
         <div class="grid2">
           <div class="card">
-            <b>👤 Профіль</b>
+            <b class="inline-ic"><i data-lucide="user"></i> Профіль</b>
             <p class="muted" id="sProfile"></p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn-g" onclick="openProfileForm()">Змінити ім'я</button>
-              <button class="btn-r" onclick="logoutUser()">🚪 Вийти з акаунта</button>
+              <button class="btn-r btn-ic" onclick="logoutUser()"><i data-lucide="log-out"></i><span>Вийти з акаунта</span></button>
             </div>
           </div>
           <div class="card">
-            <b>🕒 Тарифи</b>
+            <b class="inline-ic"><i data-lucide="clock"></i> Тарифи</b>
             <p class="muted" id="sTariff"></p>
             <button class="btn-g" onclick="openTariffForm()">Змінити тарифи</button>
           </div>
           <div class="card">
-            <b>⚡ Ліміт автомата</b>
+            <b class="inline-ic"><i data-lucide="zap"></i> Ліміт автомата</b>
             <p class="muted" id="sLimitTxt"></p>
             <button class="btn-g" onclick="openLimitForm()">Змінити ліміт</button>
           </div>
           <div class="card">
-            <b>⏱️ Параметри графіків і сповіщень</b>
+            <b class="inline-ic"><i data-lucide="bell-ring"></i> Параметри графіків і сповіщень</b>
             <p class="muted" id="sChart"></p>
             <button class="btn-g" onclick="openChartForm()">Змінити параметри</button>
           </div>
           <div class="card">
-            <b>🔗 Бекенд</b>
+            <b class="inline-ic"><i data-lucide="server"></i> Бекенд</b>
             <p class="muted" id="sApi"></p>
             <button class="btn-g" onclick="openApiForm()">Змінити адресу</button>
           </div>
           <div class="card">
-            <b>🗑️ Дані</b>
-            <p class="muted">Усі дані зберігаються у браузері (localStorage).</p>
+            <b class="inline-ic"><i data-lucide="trash-2"></i> Дані</b>
+            <p class="muted">Усі дані зберігаються у браузері (localStorage) та БД.</p>
             <button class="btn-r" onclick="resetAll()">Скинути все</button>
           </div>
           <div class="card">
-            <b>💾 Резервна копія</b>
+            <b class="inline-ic"><i data-lucide="hard-drive-download"></i> Резервна копія</b>
             <p class="muted">Експорт і імпорт усіх будинків, приладів і налаштувань у файл JSON.</p>
-            <button class="btn-g" onclick="exportData()">⬇️ Експорт</button>
-            <button class="btn-g" onclick="$('importFile').click()">⬆️ Імпорт</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-g btn-ic" onclick="exportData()"><i data-lucide="download"></i><span>Експорт</span></button>
+              <button class="btn-g btn-ic" onclick="$('importFile').click()"><i data-lucide="upload"></i><span>Імпорт</span></button>
+            </div>
             <input type="file" id="importFile" accept=".json" style="display:none">
           </div>
           <div class="card">
-            <b>ℹ️ Про проєкт</b>
+            <b class="inline-ic"><i data-lucide="info"></i> Про проєкт</b>
             <p class="muted">ЕнергіяДім — симулятор споживання електроенергії побутовими приладами. Двозонний тариф: ніч 23:00–07:00, день 07:00–23:00. Розрахунок виконує FastAPI-бекенд (<code>/api/simulate</code>).</p>
           </div>
         </div>
@@ -350,26 +539,35 @@
   <!-- ===== RIGHT SIDEBAR ===== -->
   <aside class="right">
     <div class="house-sw" id="houseSwitch" title="Перемкнути будинок">
-      <span class="hs-i">🏠</span>
-      <div class="grow"><small class="muted">Будинок</small><div id="hsName" class="bold"></div><small class="green">● Онлайн</small></div>
-      <small>▾</small>
+      <span class="hs-thumb" aria-hidden="true">
+        <svg viewBox="0 0 64 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="32,6 58,20 32,36 6,20" fill="#132238" stroke="#38BDF8" stroke-opacity="0.3"/>
+          <polygon points="16,18 32,27 32,39 16,30" fill="#263754"/>
+          <polygon points="32,27 46,19 46,31 32,39" fill="#172338"/>
+          <polygon points="20,23 25,26 25,31 20,28" fill="#FACC15"/>
+          <polygon points="36,26 42,23 42,28 36,31" fill="#FACC15" opacity="0.85"/>
+          <polygon points="15,17 29,9 47,19 32,27" fill="#334155" stroke="#94A3B8" stroke-opacity="0.4"/>
+        </svg>
+      </span>
+      <div class="grow"><small class="muted">Будинок</small><div id="hsName" class="bold">Мій будинок</div><small class="green">● Онлайн</small></div>
+      <i data-lucide="chevrons-up-down" class="chev"></i>
     </div>
-    <div class="row-between"><b>Прилади</b><button class="round" onclick="openApplianceForm()">+</button></div>
+    <div class="row-between"><b>Прилади</b><button class="round" onclick="openApplianceForm()" title="Додати прилад">+</button></div>
     <div id="rsList"></div>
     <button class="dashed" onclick="openApplianceForm()">+ Додати прилад</button>
-    <button class="btn-y" style="width:100%" onclick="openOptimizeModal()">✨ Оптимізувати розклад</button>
+    <button class="btn-y btn-ic" style="width:100%;justify-content:center" onclick="openOptimizeModal()"><i data-lucide="sparkles"></i><span>Оптимізувати розклад</span></button>
 
     <b>Налаштування будинку</b>
-    <button class="set" onclick="openTariffForm()"><i>🕒</i><div class="grow"><div>Тарифи на електроенергію</div><small id="rsTariff"></small></div>›</button>
-    <button class="set" onclick="openLimitForm()"><i>⚡</i><div class="grow"><div>Ліміти автоматів</div><small id="rsLimit"></small></div>›</button>
-    <button class="set" onclick="openChartForm()"><i>⏱️</i><div class="grow"><div>Параметри графіків</div><small>Сигнали та сповіщення</small></div>›</button>
+    <button class="set" onclick="openTariffForm()"><i><i data-lucide="clock"></i></i><div class="grow"><div>Тарифи на електроенергію</div><small id="rsTariff"></small></div><i data-lucide="chevron-right" class="chev"></i></button>
+    <button class="set" onclick="openLimitForm()"><i><i data-lucide="zap"></i></i><div class="grow"><div>Ліміти автоматів</div><small id="rsLimit"></small></div><i data-lucide="chevron-right" class="chev"></i></button>
+    <button class="set" onclick="openChartForm()"><i><i data-lucide="bell-ring"></i></i><div class="grow"><div>Параметри графіків</div><small>Сигнали та сповіщення</small></div><i data-lucide="chevron-right" class="chev"></i></button>
   </aside>
 </div>
 
 <!-- ===== GENERIC MODAL ===== -->
 <div class="overlay" id="overlay">
   <div class="modal">
-    <div class="row-between"><b id="mTitle"></b><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="row-between"><b id="mTitle"></b><button class="x" onclick="closeModal()"><i data-lucide="x"></i></button></div>
     <div id="mBody"></div>
     <div class="m-actions"><button class="btn-g" onclick="closeModal()">Скасувати</button><button class="btn-y" id="mSave">Зберегти</button></div>
   </div>
@@ -379,27 +577,46 @@
 
 <!-- ===== ЕКРАН ВХОДУ ТА РЕЄСТРАЦІЇ ===== -->
 <div class="auth-screen" id="authScreen">
+  <div class="auth-glow auth-glow-1"></div>
+  <div class="auth-glow auth-glow-2"></div>
   <div class="auth-box">
-    <div class="auth-logo">⚡ <b>ЕнергіяДім</b></div>
-    <p class="auth-sub">Увійдіть або створіть особистий кабінет — кожен користувач бачить лише свої будинки та розрахунки.</p>
+    <div class="auth-badge-top"><i data-lucide="shield-check"></i> Особистий енергокабінет</div>
+    <div class="auth-logo">
+      <span class="auth-logo-ic"><i data-lucide="zap"></i></span>
+      <b>ЕнергіяДім</b>
+    </div>
+    <p class="auth-sub">Увійдіть або створіть кабінет для моделювання споживання, розрахунку тарифів та графіків відключень.</p>
     <div class="auth-tabs">
-      <button type="button" id="authTabLogin" class="active" onclick="switchAuthTab('login')">🔑 Вхід</button>
-      <button type="button" id="authTabReg" onclick="switchAuthTab('register')">✨ Реєстрація</button>
+      <button type="button" id="authTabLogin" class="active btn-ic" onclick="switchAuthTab('login')"><i data-lucide="log-in"></i><span>Вхід</span></button>
+      <button type="button" id="authTabReg" class="btn-ic" onclick="switchAuthTab('register')"><i data-lucide="user-plus"></i><span>Реєстрація</span></button>
     </div>
     <form id="authForm" onsubmit="submitAuth(event)">
       <div id="authNameWrap" style="display:none">
         <label class="f-l" for="authName">Ваше ім'я</label>
-        <input class="f-i" id="authName" placeholder="Наприклад: Олександр" autocomplete="name">
+        <div class="inp-wrap">
+          <i data-lucide="user"></i>
+          <input class="f-i with-ic" id="authName" placeholder="Наприклад: Дмитро" autocomplete="name">
+        </div>
       </div>
       <label class="f-l" for="authUser">Логін</label>
-      <input class="f-i" id="authUser" placeholder="Наприклад: alex2026" required autocomplete="username">
+      <div class="inp-wrap">
+        <i data-lucide="at-sign"></i>
+        <input class="f-i with-ic" id="authUser" placeholder="Наприклад: dmytro2026" required autocomplete="username">
+      </div>
       <label class="f-l" for="authPass">Пароль</label>
-      <input class="f-i" id="authPass" type="password" placeholder="Мінімум 4 символи" required autocomplete="current-password">
+      <div class="inp-wrap">
+        <i data-lucide="lock"></i>
+        <input class="f-i with-ic" id="authPass" type="password" placeholder="Мінімум 4 символи" required autocomplete="current-password">
+      </div>
       <div class="auth-err" id="authErr" style="display:none"></div>
-      <button type="submit" class="btn-y" id="authSubmitBtn" style="width:100%;margin-top:16px">Увійти</button>
+      <button type="submit" class="btn-y btn-ic" id="authSubmitBtn" style="width:100%;margin-top:18px;justify-content:center">
+        <i data-lucide="arrow-right"></i><span>Увійти в систему</span>
+      </button>
     </form>
-    <div class="auth-divider">або</div>
-    <button type="button" class="btn-g" style="width:100%" onclick="quickDemoLogin()">⚡ Швидкий демо-акаунт (1 клік)</button>
+    <div class="auth-divider"><span>або швидкий старт</span></div>
+    <button type="button" class="btn-g btn-ic" id="authDemoBtn" style="width:100%;justify-content:center" onclick="quickDemoLogin()">
+      <i data-lucide="sparkles"></i><span>Запустити демо-кабінет (1 клік)</span>
+    </button>
   </div>
 </div>
 
