@@ -71,7 +71,7 @@ function defaultState() {
         profile: { name: "Гість" },
         activeHouse: 1,
         settings: { api: detectDefaultApi(), showLimit: true, alerts: true, warnPercent: 80, chartMax: 0 },
-        houses: [{ id: 1, name: "Мій будинок", address: "вул. Центральна, 8", voltage: 230, amps: 16, dayRate: 4.32, nightRate: 2.16, appliances: [] }],
+        houses: [{ id: 1, name: "Мій будинок", address: "", voltage: 230, amps: 16, dayRate: 4.32, nightRate: 2.16, appliances: [] }],
         events: [],
     };
 }
@@ -80,12 +80,29 @@ function load() {
     try {
         const s = JSON.parse(localStorage.getItem(KEY));
         if (s && s.settings) {
+            // Якщо в старому кеші залишився гостьовий токен — не відновлюємо його
+            if (s.auth?.user?.is_guest) {
+                s.auth = null;
+                s.houses = defaultState().houses;
+                s.events = [];
+            }
             return { ...defaultState(), ...s, settings: { ...defaultState().settings, ...s.settings } };
         }
     } catch (e) {}
     return defaultState();
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+function save() {
+    // Гостьові акаунти одноразові: не зберігаємо їхні токени та будинки в localStorage
+    if (state.auth?.user?.is_guest) {
+        const cleanCopy = {
+            ...defaultState(),
+            settings: state.settings,
+        };
+        localStorage.setItem(KEY, JSON.stringify(cleanCopy));
+        return;
+    }
+    localStorage.setItem(KEY, JSON.stringify(state));
+}
 const activeHouse = () => state.houses.find(h => h.id === state.activeHouse) || state.houses[0] || defaultState().houses[0];
 const limitOf = h => (h.voltage || 230) * (h.amps || 16);
 const apiUrl = path => (state.settings.api || "") + path;
@@ -181,7 +198,7 @@ async function apiFetch(path, options = {}) {
     if (!r.ok) {
         let detail = "HTTP " + r.status;
         try { const err = await r.json(); if (err.detail) detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail); } catch (e) {}
-        if (r.status === 401 && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register")) {
+        if (r.status === 401 && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register") && !path.startsWith("/api/auth/guest")) {
             state.auth = null;
             save();
             showAuthScreen();
@@ -260,13 +277,18 @@ $("mSave").addEventListener("click", async () => {
 // 3. ФОРМИ ТА РОБОТА З БАЗОЮ ДАНИХ (/api/houses)
 // ============================================================
 function openProfileForm() {
+    const isGuest = Boolean(state.auth?.user?.is_guest);
     const uname = state.auth?.user?.username ? `Логін: <b>${esc(state.auth.user.username)}</b>` : "";
+    const guestNote = isGuest
+        ? `<div class="muted" style="margin:6px 0 10px;color:#FACC15">Одноразовий гостьовий сеанс: після виходу або закриття сайту цей акаунт та його дані автоматично видаляються з БД.</div>`
+        : "";
+    const logoutLabel = isGuest ? "Вийти та видалити гостьовий акаунт" : "Вийти з акаунта";
     openForm({
         title: "Особистий профіль",
         fields: [
-            { type: "html", key: "uinfo", html: uname ? `<div class="muted" style="margin:4px 0 10px">${uname}</div>` : "" },
+            { type: "html", key: "uinfo", html: (uname ? `<div class="muted" style="margin:4px 0 6px">${uname}</div>` : "") + guestNote },
             { key: "name", label: "Ваше ім'я", value: state.profile.name },
-            { type: "html", key: "logout", html: `<div style="margin-top:14px"><button type="button" class="btn-r" style="width:100%" onclick="closeModal();logoutUser()">Вийти з акаунта</button></div>` },
+            { type: "html", key: "logout", html: `<div style="margin-top:14px"><button type="button" class="btn-r" style="width:100%" onclick="closeModal();logoutUser()">${logoutLabel}</button></div>` },
         ],
         onSave: async v => {
             const newName = v.name.trim();
@@ -551,28 +573,27 @@ async function submitAuth(e) {
     }
 }
 
+let _guestDestroySent = false;
+
 async function quickDemoLogin() {
     $("authErr").style.display = "none";
     const demoBtn = $("authDemoBtn");
     demoBtn.disabled = true;
 
-    const id = Date.now().toString(36).slice(-5);
-    const username = `guest_${id}`;
-    const password = `demo_${id}`;
-    const name = `Гість ${id.toUpperCase()}`;
     try {
-        const res = await apiFetch("/api/auth/register", {
-            method: "POST",
-            body: JSON.stringify({ name, username, password }),
-        });
+        const res = await apiFetch("/api/auth/guest", { method: "POST" });
+        _guestDestroySent = false;
         state.auth = { token: res.token, user: res.user };
         state.profile.name = res.user.name;
+        state.houses = defaultState().houses;
         state.events = [];
         lastOverKey = null;
+        lastOptimization = null;
+        if ($("optResult")) $("optResult").style.display = "none";
         save();
         hideAuthScreen();
         await initFromDb();
-        toast(`Створено окремий демо-кабінет: ${res.user.name}`);
+        toast(`Відкрито пустий гостьовий кабінет (${res.user.name})`);
     } catch (err) {
         $("authErr").textContent = err.message;
         $("authErr").style.display = "block";
@@ -581,15 +602,56 @@ async function quickDemoLogin() {
     }
 }
 
-function logoutUser() {
-    state.auth = null;
-    state.events = [];
+async function logoutUser() {
+    const token = state.auth?.token || null;
+    const wasGuest = Boolean(state.auth?.user?.is_guest);
+    _guestDestroySent = true;
+
+    const savedSettings = state.settings;
+    state = defaultState();
+    state.settings = savedSettings;
     lastOverKey = null;
+    lastOptimization = null;
     sim = null;
+    if ($("optResult")) $("optResult").style.display = "none";
     save();
+    renderShell();
     showAuthScreen();
-    toast("Ви вийшли з акаунта");
+
+    if (token) {
+        try {
+            await fetch(apiUrl("/api/auth/logout"), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: "Bearer " + token,
+                },
+                body: JSON.stringify({ token }),
+                keepalive: true,
+            });
+        } catch (e) {}
+    }
+
+    toast(wasGuest ? "Гостьовий акаунт видалено з бази даних" : "Ви вийшли з акаунта");
 }
+
+function _destroyGuestOnClose() {
+    if (_guestDestroySent) return;
+    if (!state.auth?.user?.is_guest || !state.auth?.token) return;
+    _guestDestroySent = true;
+    const token = state.auth.token;
+    state.auth = null;
+    save();
+    const url = apiUrl("/api/auth/logout");
+    const payload = JSON.stringify({ token });
+    if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, payload);
+    } else {
+        fetch(url, { method: "POST", body: payload, keepalive: true }).catch(() => {});
+    }
+}
+
+window.addEventListener("pagehide", _destroyGuestOnClose);
 
 async function initFromDb() {
     if (!state.auth || !state.auth.token) {
@@ -682,7 +744,7 @@ function renderShell() {
     if (addrSpan) addrSpan.textContent = h.address || "адресу не вказано";
     $("hsName").textContent = h.address || h.name;
     $("rsTariff").textContent = `День: ${h.dayRate} / Ніч: ${h.nightRate} грн`; $("rsLimit").textContent = `${limitOf(h)} Вт (${h.voltage} В × ${h.amps} А)`;
-    $("sProfile").textContent = `Ім'я: ${state.profile.name}` + (state.auth?.user?.username ? ` • Логін: ${state.auth.user.username}` : "");
+    $("sProfile").textContent = `Ім'я: ${state.profile.name}` + (state.auth?.user?.username ? ` • Логін: ${state.auth.user.username}` : "") + (state.auth?.user?.is_guest ? " • Одноразовий гість" : "");
     $("sTariff").textContent = `Будинок «${h.name}»: день ${h.dayRate} грн, ніч ${h.nightRate} грн за кВт·год`;
     $("sLimitTxt").textContent = `${h.voltage} В × ${h.amps} А = ${limitOf(h)} Вт`;
     const s = state.settings;
@@ -992,7 +1054,13 @@ function buildOptSummaryHtml(opt) {
 async function previewOptimization(userClicked = false) {
     try {
         const opt = await fetchOptimization();
-        if (!opt) return;
+        if (!opt) {
+            lastOptimization = null;
+            if ($("optResult")) $("optResult").style.display = "none";
+            if ($("btnApplyOpt")) $("btnApplyOpt").style.display = "none";
+            if (userClicked) toast("Спочатку додайте та увімкніть прилади");
+            return;
+        }
         lastOptimization = opt;
         const { headline, rowsHtml, hasChanges } = buildOptSummaryHtml(opt);
         $("optHeadline").innerHTML = headline;

@@ -9,30 +9,48 @@ database.py — Ініціалізація БД та моделі таблиць
 
 import json
 import os
+import time
 from sqlalchemy import (
     create_engine, Column, Integer, Float, String,
-    Boolean, ForeignKey, Text, inspect, text
+    Boolean, ForeignKey, Text, event, inspect, text
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-# ---------- Підключення до SQLite ----------
+# ---------- Підключення до SQLite / PostgreSQL ----------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./energy.db")
 SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+connect_args = {"check_same_thread": False, "timeout": 30} if IS_SQLITE else {}
+pool_kwargs = (
+    {}
+    if ":memory:" in DATABASE_URL
+    else {"pool_size": 25, "max_overflow": 50, "pool_timeout": 30, "pool_pre_ping": True}
+)
 
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
     echo=SQL_ECHO,  # Вимкнено за замовчуванням, щоб не засмічувати логи
+    **pool_kwargs,
 )
+
+if IS_SQLITE:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("PRAGMA busy_timeout=30000;")
+        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
 # ============================================================
-# 0. КОРИСТУВАЧІ (особисті акаунти)
+# 0. КОРИСТУВАЧІ (особисті та одноразові гостьові акаунти)
 # ============================================================
 class User(Base):
     """Користувач системи з власним набором будинків та приладів."""
@@ -43,6 +61,9 @@ class User(Base):
     name          = Column(String(100), nullable=False)
     password_hash = Column(String(200), nullable=False)
     salt          = Column(String(64),  nullable=False)
+    is_guest      = Column(Boolean, default=False, nullable=False, index=True)
+    created_at    = Column(Integer, default=lambda: int(time.time()), nullable=False)
+    last_seen_at  = Column(Integer, default=lambda: int(time.time()), nullable=False)
 
     houses = relationship("House", back_populates="owner", cascade="all, delete-orphan")
 
@@ -132,6 +153,11 @@ def _ensure_columns():
     tables = inspector.get_table_names()
 
     migrations = {
+        "users": [
+            ("is_guest", "BOOLEAN DEFAULT 0"),
+            ("created_at", "INTEGER DEFAULT 0"),
+            ("last_seen_at", "INTEGER DEFAULT 0"),
+        ],
         "houses": [
             ("user_id", "INTEGER"),
             ("address", "VARCHAR(200) DEFAULT ''"),
@@ -250,16 +276,24 @@ def seed_catalog(db):
     seed_default_house(db)
 
 
-def seed_default_house(db, user_id: int | None = None, house_name: str = "Мій будинок"):
-    """Створює демонстраційний будинок з приладами для користувача (або анонімного контексту)."""
+def seed_default_house(
+    db,
+    user_id: int | None = None,
+    house_name: str = "Мій будинок",
+    with_appliances: bool = True,
+    address: str | None = None,
+):
+    """Створює стартовий будинок для користувача (з приладами або повністю пустий для гостя)."""
     q = db.query(House).filter(House.user_id.is_(None) if user_id is None else House.user_id == user_id)
     if q.count() > 0:
         return
 
+    resolved_address = ("вул. Центральна, 8" if with_appliances else "") if address is None else address
+
     house = House(
         user_id=user_id,
         name=house_name,
-        address="вул. Центральна, 8",
+        address=resolved_address,
         voltage=230.0,
         amps=16.0,
         max_power_watt=3680.0,
@@ -269,6 +303,9 @@ def seed_default_house(db, user_id: int | None = None, house_name: str = "Мій
     db.add(house)
     db.commit()
     db.refresh(house)
+
+    if not with_appliances:
+        return
 
     catalog_by_name = {c.name: c for c in db.query(ApplianceCatalog).all()}
     starter_appliances = [
@@ -288,3 +325,26 @@ def seed_default_house(db, user_id: int | None = None, house_name: str = "Мій
                 enabled=True,
             ))
     db.commit()
+
+
+def cleanup_expired_guests(db, max_idle_seconds: int = 7200) -> int:
+    """
+    Видаляє застарілі гостьові акаунти (разом із їхніми будинками та приладами),
+    якщо браузер користувача аварійно закрився без сигналу виходу.
+    """
+    cutoff = int(time.time()) - max_idle_seconds
+    stale_guests = (
+        db.query(User)
+        .filter(
+            User.is_guest.is_(True),
+            ((User.last_seen_at > 0) & (User.last_seen_at < cutoff))
+            | ((User.last_seen_at == 0) & (User.created_at > 0) & (User.created_at < cutoff)),
+        )
+        .all()
+    )
+    if not stale_guests:
+        return 0
+    for guest in stale_guests:
+        db.delete(guest)
+    db.commit()
+    return len(stale_guests)

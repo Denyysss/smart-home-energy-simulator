@@ -320,3 +320,134 @@ def test_multi_user_account_isolation():
         # Підроблений токен відхиляється з 401
         assert client.get("/api/houses", headers={"Authorization": "Bearer invalid.token"}).status_code == 401
 
+
+def test_guest_account_empty_and_deleted_on_close_or_logout():
+    """
+    Гостьовий акаунт має бути повністю пустим (0 приладів, 0 кВт·год),
+    не дозволяти вхід за паролем і повністю видалятись із БД при виході або закритті сайту (sendBeacon).
+    """
+    from database import SessionLocal, User, House, HouseAppliance
+
+    with TestClient(app) as client:
+        r_guest = client.post("/api/auth/guest")
+        assert r_guest.status_code == 200
+        g_data = r_guest.json()
+        token = g_data["token"]
+        guest_user = g_data["user"]
+        guest_id = guest_user["id"]
+        assert guest_user["is_guest"] is True
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 1. Будинок гостя повністю пустий (жодного бойлера чи холодильника)
+        houses = client.get("/api/houses", headers=headers).json()
+        assert len(houses) == 1
+        hid = houses[0]["id"]
+        assert houses[0]["appliances"] == []
+
+        sim_res = client.get(f"/api/houses/{hid}/simulate", headers=headers).json()
+        assert sim_res["total_kwh"] == 0.0
+        assert sim_res["total_cost"] == 0.0
+
+        # 2. Гість додає прилад під час сеансу
+        r_add = client.post(
+            f"/api/houses/{hid}/appliances",
+            json={"catalog_id": 1, "quantity": 1, "schedule": [10, 11], "enabled": True},
+            headers=headers,
+        )
+        assert r_add.status_code == 200
+        aid = r_add.json()["id"]
+
+        # 3. Зайти на гостьовий логін через звичайну форму входу неможливо
+        r_login = client.post("/api/auth/login", json={"username": guest_user["username"], "password": "guest_ephemeral"})
+        assert r_login.status_code == 401
+
+        # 4. Закриття вкладки (navigator.sendBeacon шле text/plain без заголовка Authorization)
+        r_beacon = client.post(
+            "/api/auth/logout",
+            content=f'{{"token": "{token}"}}',
+            headers={"Content-Type": "text/plain;charset=UTF-8"},
+        )
+        assert r_beacon.status_code == 200
+        assert r_beacon.json()["deleted_guest"] is True
+
+        # 5. Доступ за цим токеном більше неможливий (401), а записи в БД каскадно видалені
+        assert client.get("/api/auth/me", headers=headers).status_code == 401
+        assert client.get("/api/houses", headers=headers).status_code == 401
+
+        db = SessionLocal()
+        try:
+            assert db.query(User).filter(User.id == guest_id).first() is None
+            assert db.query(House).filter(House.id == hid).first() is None
+            assert db.query(HouseAppliance).filter(HouseAppliance.id == aid).first() is None
+        finally:
+            db.close()
+
+
+def test_sixty_concurrent_guests_and_auto_cleanup():
+    """
+    Перевірка одночасного входу 60 гостей (більше 50 за вимогою) без колізій і блокувань БД,
+    а також повного очищення бази даних після їх виходу та по таймауту.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+    from database import SessionLocal, User, House, cleanup_expired_guests
+
+    num_guests = 60
+
+    with TestClient(app) as client:
+        def spawn_one(_i: int):
+            r = client.post("/api/auth/guest")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            tok = body["token"]
+            hs = client.get("/api/houses", headers={"Authorization": f"Bearer {tok}"})
+            assert hs.status_code == 200
+            houses = hs.json()
+            assert len(houses) == 1
+            assert houses[0]["appliances"] == []
+            return tok, body["user"]["id"], houses[0]["id"]
+
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            created = list(pool.map(spawn_one, range(num_guests)))
+
+        assert len(created) == num_guests
+        guest_ids = {uid for _, uid, _ in created}
+        house_ids = {hid for _, _, hid in created}
+        assert len(guest_ids) == num_guests  # Жодних колізій ID чи логінів
+
+        # Перші 55 гостей виходять одночасно (частина кнопкою, частина через закриття сайту)
+        def close_one(idx_item):
+            idx, (tok, _uid, _hid) = idx_item
+            if idx % 2 == 0:
+                r = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {tok}"})
+            else:
+                r = client.post("/api/auth/logout", content=f'{{"token":"{tok}"}}', headers={"Content-Type": "text/plain"})
+            assert r.status_code == 200
+            assert r.json()["deleted_guest"] is True
+
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            list(pool.map(close_one, enumerate(created[:55])))
+
+        # Останні 5 імітують аварійне вимкнення ПК без sendBeacon -> перевіряємо автоочищення TTL
+        stale_ids = [uid for _, uid, _ in created[55:]]
+        db = SessionLocal()
+        try:
+            old_ts = int(time.time()) - 10_000
+            db.query(User).filter(User.id.in_(stale_ids)).update(
+                {"created_at": old_ts, "last_seen_at": old_ts},
+                synchronize_session=False,
+            )
+            db.commit()
+
+            purged = cleanup_expired_guests(db, max_idle_seconds=7200)
+            assert purged >= 5
+
+            # Жодного з 60 тестових гостьових акаунтів або їхніх будинків у БД не залишилось
+            remaining_users = db.query(User).filter(User.id.in_(guest_ids)).count()
+            remaining_houses = db.query(House).filter(House.id.in_(house_ids)).count()
+            assert remaining_users == 0
+            assert remaining_houses == 0
+        finally:
+            db.close()
+
+
