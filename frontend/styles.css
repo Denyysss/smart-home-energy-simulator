@@ -1,3 +1,16 @@
+#authScreen {
+  isolation: isolate;
+}
+
+#authScreen > #auth-background {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  z-index: -1;
+}
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
   --bg:#060B16;--bg2:#0B1120;--card:#141F35;--card2:#1A2844;--inp:#0C1424;
