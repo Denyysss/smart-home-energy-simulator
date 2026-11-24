@@ -35,7 +35,13 @@ from sqlalchemy.orm import Session
 
 from database import (
     SessionLocal, init_db, seed_catalog, seed_default_house, cleanup_expired_guests,
-    ApplianceCatalog, House, HouseAppliance, User
+    ApplianceCatalog, House, HouseAppliance, User, AddressQueueMemory
+)
+from gpv_service import (
+    load_katottg, list_oblasts, list_raions, list_settlements,
+    search_streets_for_settlement, normalize_location_keys,
+    get_live_region_schedule, compute_queue_live_status,
+    match_queues_for_location, OBLAST_TO_GPV_REGION
 )
 from simulation import simulate, optimize_schedule, ApplianceInput
 
@@ -48,6 +54,7 @@ _LAST_GUEST_CLEANUP_TS = 0
 async def lifespan(app: FastAPI):
     global _LAST_GUEST_CLEANUP_TS
     init_db()
+    load_katottg()
     db = SessionLocal()
     try:
         seed_catalog(db)
@@ -88,6 +95,17 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def security_and_nocache_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 # ---------- Залежність: отримання сесії БД ----------
@@ -276,11 +294,33 @@ class HouseUpdate(BaseModel):
     day_rate: float | None = Field(None, ge=0, le=1000)
     night_rate: float | None = Field(None, ge=0, le=1000)
     outage_hours: list[int] | None = Field(None, max_length=24)
+    gpv_auto_sync: bool | None = None
 
     @field_validator("outage_hours")
     @classmethod
     def check_outage_hours(cls, v: list[int] | None) -> list[int] | None:
         return validate_hours_list(v) if v is not None else None
+
+
+class GpvLookupRequest(BaseModel):
+    """Пошук та розумна фільтрація черги ГПВ за областю, районом, селом, вулицею та наявністю світла."""
+    oblast: str = Field("Вінницька", max_length=80)
+    raion: str = Field("", max_length=100)
+    settlement: str = Field("", max_length=120)
+    street: str = Field("", max_length=150)
+    has_power_now: bool | None = None
+
+
+class HouseGpvBindRequest(BaseModel):
+    """Прив'язка адреси (Область -> Район -> Село/Місто -> Вулиця) та живої черги ГПВ до будинку."""
+    oblast: str = Field("Вінницька", min_length=1, max_length=80)
+    raion: str = Field("", max_length=100)
+    settlement: str = Field("", max_length=120)
+    street: str = Field("", max_length=150)
+    house_num: str = Field("", max_length=30)
+    gpv_queue: str = Field(..., min_length=1, max_length=16)
+    gpv_auto_sync: bool = Field(True)
+    remember_for_location: bool = Field(True)
 
 
 class PresetRequest(BaseModel):
@@ -373,7 +413,32 @@ def serialize_house_appliance(ha: HouseAppliance) -> dict:
     }
 
 
-def serialize_house(h: House) -> dict:
+def sync_house_gpv_if_enabled(db: Session, h: House, force_refresh: bool = False) -> dict | None:
+    """
+    Якщо у будинку ввімкнено автосинхронізацію з обленерго (`gpv_auto_sync`),
+    автоматично звіряє години відключень із фактичним оперативним графіком (`fact`).
+    Якщо обленерго скасувало або змінило відключення (наприклад, о 14:01 дали світло),
+    автоматично оновлює `outage_hours` у БД.
+    """
+    if not h.gpv_auto_sync or not h.gpv_queue:
+        return None
+
+    reg = h.gpv_region or "vinnytsia"
+    sched = get_live_region_schedule(reg, force_refresh=force_refresh)
+    live_st = compute_queue_live_status(reg, h.gpv_queue, sched_data=sched)
+
+    old_outage = json.loads(h.outage_hours) if isinstance(h.outage_hours, str) and h.outage_hours else []
+    new_outage = live_st["outage_hours"]
+    changed = sorted(old_outage) != sorted(new_outage)
+    if changed:
+        h.outage_hours = json.dumps(new_outage)
+        db.commit()
+        db.refresh(h)
+    live_st["schedule_changed"] = changed
+    return live_st
+
+
+def serialize_house(h: House, live_gpv: dict | None = None) -> dict:
     voltage = h.voltage if h.voltage is not None else 230.0
     amps = h.amps if h.amps is not None else 16.0
     max_power = h.max_power_watt if h.max_power_watt else (voltage * amps)
@@ -382,6 +447,15 @@ def serialize_house(h: House) -> dict:
         "id": h.id,
         "name": h.name,
         "address": h.address or "",
+        "oblast": h.oblast or "",
+        "raion": h.raion or "",
+        "settlement": h.settlement or "",
+        "street": h.street or "",
+        "house_num": h.house_num or "",
+        "gpv_region": h.gpv_region or "vinnytsia",
+        "gpv_queue": h.gpv_queue or "",
+        "gpv_auto_sync": bool(h.gpv_auto_sync),
+        "live_gpv": live_gpv,
         "voltage": voltage,
         "amps": amps,
         "max_power_watt": max_power,
@@ -710,10 +784,164 @@ def list_houses(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
-    """Список будинків поточного користувача разом із їхніми приладами."""
+    """Список будинків поточного користувача (із живою автосинхронізацією ГПВ, якщо вона увімкнена)."""
     cond = House.user_id == current_user.id if current_user is not None else House.user_id.is_(None)
     houses = db.query(House).filter(cond).order_by(House.id).all()
-    return [serialize_house(h) for h in houses]
+    out = []
+    for h in houses:
+        live_gpv = sync_house_gpv_if_enabled(db, h)
+        out.append(serialize_house(h, live_gpv=live_gpv))
+    return out
+
+
+# --- 3a. Довідник адрес України (КАТОТТГ: Область -> Район -> Село/Місто -> Вулиця) та живий ГПВ ---
+@app.get("/api/geo/oblasts")
+def api_geo_oblasts():
+    """Повертає список областей України (Вінницька область першою)."""
+    return list_oblasts()
+
+
+@app.get("/api/geo/raions")
+def api_geo_raions(oblast: str = "Вінницька"):
+    """Повертає всі райони вибраної області."""
+    return list_raions(oblast)
+
+
+@app.get("/api/geo/settlements")
+def api_geo_settlements(oblast: str = "Вінницька", raion: str = "Вінницький", q: str = ""):
+    """Повертає міста, селища та села вибраного району (усі ~1500 населених пунктів Вінниччини)."""
+    return list_settlements(oblast, raion, q=q)
+
+
+@app.get("/api/geo/streets")
+def api_geo_streets(oblast: str = "Вінницька", raion: str = "", settlement: str = "", q: str = ""):
+    """Повертає реальні вулиці вибраного села чи міста."""
+    if not settlement.strip():
+        return []
+    return search_streets_for_settlement(oblast, raion, settlement, q=q)
+
+
+@app.post("/api/gpv/lookup")
+def api_gpv_lookup(data: GpvLookupRequest, db: Session = Depends(get_db)):
+    """
+    Перевіряє актуальний фактичний графік обленерго (`fact`), шукає збережену чергу для цього села/вулиці
+    та відсіює черги за відповіддю користувача «Чи є зараз світло?».
+    """
+    remembered_queue: str | None = None
+    if data.settlement.strip():
+        street_key, settlement_key = normalize_location_keys(
+            data.oblast, data.raion, data.settlement, data.street
+        )
+        mem = db.query(AddressQueueMemory).filter(AddressQueueMemory.location_key == street_key).first()
+        if not mem and street_key != settlement_key:
+            mem = db.query(AddressQueueMemory).filter(AddressQueueMemory.location_key == settlement_key).first()
+        if mem:
+            remembered_queue = mem.gpv_queue
+
+    return match_queues_for_location(
+        oblast=data.oblast,
+        raion=data.raion,
+        settlement=data.settlement,
+        street=data.street,
+        has_power_now=data.has_power_now,
+        remembered_queue=remembered_queue,
+    )
+
+
+def _format_structured_address(oblast: str, raion: str, settlement: str, street: str, house_num: str) -> str:
+    parts: list[str] = []
+    if oblast and oblast != "м. Київ":
+        parts.append(f"{oblast} обл.")
+    if raion and raion != "м. Київ" and not settlement.startswith("м. Вінниця"):
+        parts.append(f"{raion} р-н")
+    if settlement:
+        parts.append(settlement.split("(", 1)[0].strip())
+    if street:
+        st_clean = street.strip()
+        if house_num.strip():
+            parts.append(f"{st_clean}, {house_num.strip()}")
+        else:
+            parts.append(st_clean)
+    elif house_num.strip():
+        parts.append(f"буд. {house_num.strip()}")
+    return ", ".join(parts)[:200]
+
+
+@app.post("/api/houses/{house_id}/gpv-bind")
+def bind_house_live_gpv(
+    house_id: int,
+    data: HouseGpvBindRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """
+    Прив'язує повну адресу (область, район, село/місто, вулицю) та чергу обленерго до будинку,
+    запам'ятовує чергу для цієї локації в БД і відразу виставляє фактичні години відключень.
+    """
+    house = get_user_house(db, house_id, current_user)
+    reg_code = OBLAST_TO_GPV_REGION.get(data.oblast, ("vinnytsia", ""))[0]
+    q_clean = data.gpv_queue.replace("GPV", "").strip()
+
+    house.oblast = data.oblast.strip()
+    house.raion = data.raion.strip()
+    house.settlement = data.settlement.strip()
+    house.street = data.street.strip()
+    house.house_num = data.house_num.strip()
+    house.gpv_region = reg_code
+    house.gpv_queue = q_clean
+    house.gpv_auto_sync = data.gpv_auto_sync
+
+    formatted_addr = _format_structured_address(
+        house.oblast, house.raion, house.settlement, house.street, house.house_num
+    )
+    if formatted_addr:
+        house.address = formatted_addr
+
+    # Зберігаємо пам'ять черги для цього села/вулиці, щоб наступним мешканцям підставляло автоматично
+    if data.remember_for_location and house.settlement:
+        street_key, settlement_key = normalize_location_keys(
+            house.oblast, house.raion, house.settlement, house.street
+        )
+        now_ts = int(time.time())
+        for idx, key in enumerate([street_key, settlement_key]):
+            if not key:
+                continue
+            existing = db.query(AddressQueueMemory).filter(AddressQueueMemory.location_key == key).first()
+            if existing:
+                # Вуличний ключ завжди оновлюємо; сільський — якщо це село (с. / с-ще) або запису ще не було
+                if idx == 0 or not house.settlement.startswith("м. "):
+                    existing.gpv_region = reg_code
+                    existing.gpv_queue = q_clean
+                    existing.updated_at = now_ts
+            else:
+                db.add(AddressQueueMemory(
+                    location_key=key,
+                    gpv_region=reg_code,
+                    gpv_queue=q_clean,
+                    updated_at=now_ts,
+                ))
+
+    live_st = compute_queue_live_status(reg_code, q_clean)
+    if data.gpv_auto_sync:
+        house.outage_hours = json.dumps(live_st["outage_hours"])
+    live_st["schedule_changed"] = True
+
+    db.commit()
+    db.refresh(house)
+    return serialize_house(house, live_gpv=live_st)
+
+
+@app.get("/api/houses/{house_id}/gpv-sync")
+def sync_house_live_gpv(
+    house_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    """Перевіряє актуальний стан на сайті обленерго та автоматично знімає/оновлює відключення."""
+    house = get_user_house(db, house_id, current_user)
+    live_gpv = sync_house_gpv_if_enabled(db, house, force_refresh=force)
+    return serialize_house(house, live_gpv=live_gpv)
 
 
 @app.post("/api/houses")
@@ -765,6 +993,11 @@ def update_house(
         house.night_rate = data.night_rate
     if data.outage_hours is not None:
         house.outage_hours = json.dumps(data.outage_hours)
+        # Якщо користувач вручну змінює клітинки годин — вимикаємо автоперезапис від обленерго, поки не увімкне знову
+        if data.gpv_auto_sync is None:
+            house.gpv_auto_sync = False
+    if data.gpv_auto_sync is not None:
+        house.gpv_auto_sync = data.gpv_auto_sync
 
     if data.max_power_watt is not None:
         house.max_power_watt = data.max_power_watt
@@ -773,7 +1006,8 @@ def update_house(
 
     db.commit()
     db.refresh(house)
-    return serialize_house(house)
+    live_gpv = sync_house_gpv_if_enabled(db, house)
+    return serialize_house(house, live_gpv=live_gpv)
 
 
 @app.delete("/api/houses/{house_id}")

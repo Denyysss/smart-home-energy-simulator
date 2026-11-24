@@ -107,6 +107,14 @@ class House(Base):
     day_rate        = Column(Float, nullable=False, default=4.32)
     night_rate      = Column(Float, nullable=False, default=2.16)
     outage_hours    = Column(Text,  nullable=False, default="[]")
+    oblast          = Column(String(80),  nullable=True, default="")
+    raion           = Column(String(100), nullable=True, default="")
+    settlement      = Column(String(120), nullable=True, default="")
+    street          = Column(String(150), nullable=True, default="")
+    house_num       = Column(String(30),  nullable=True, default="")
+    gpv_region      = Column(String(40),  nullable=True, default="vinnytsia")
+    gpv_queue       = Column(String(16),  nullable=True, default="")
+    gpv_auto_sync   = Column(Boolean,     nullable=False, default=False)
 
     owner = relationship("User", back_populates="houses")
     appliances = relationship(
@@ -140,6 +148,23 @@ class HouseAppliance(Base):
     catalog = relationship("ApplianceCatalog")
 
 
+# ============================================================
+# 4. ПАМ'ЯТЬ АДРЕС -> ЧЕРГА ГПВ (для сіл і вулиць області)
+# ============================================================
+class AddressQueueMemory(Base):
+    """
+    Зберігає прив'язку населеного пункту / вулиці до підчерги ГПВ обленерго,
+    щоб при повторному виборі цього ж села чи вулиці черга підставлялась автоматично.
+    """
+    __tablename__ = "address_queue_memory"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    location_key = Column(String(320), nullable=False, unique=True, index=True)
+    gpv_region   = Column(String(40),  nullable=False, default="vinnytsia")
+    gpv_queue    = Column(String(16),  nullable=False)
+    updated_at   = Column(Integer,     default=lambda: int(time.time()), nullable=False)
+
+
 # ---------- Створення та міграція таблиць ----------
 def init_db():
     """Створює всі таблиці та додає відсутні колонки у випадку оновлення."""
@@ -166,6 +191,14 @@ def _ensure_columns():
             ("day_rate", "FLOAT DEFAULT 4.32"),
             ("night_rate", "FLOAT DEFAULT 2.16"),
             ("outage_hours", "TEXT DEFAULT '[]'"),
+            ("oblast", "VARCHAR(80) DEFAULT ''"),
+            ("raion", "VARCHAR(100) DEFAULT ''"),
+            ("settlement", "VARCHAR(120) DEFAULT ''"),
+            ("street", "VARCHAR(150) DEFAULT ''"),
+            ("house_num", "VARCHAR(30) DEFAULT ''"),
+            ("gpv_region", "VARCHAR(40) DEFAULT 'vinnytsia'"),
+            ("gpv_queue", "VARCHAR(16) DEFAULT ''"),
+            ("gpv_auto_sync", "BOOLEAN DEFAULT 0"),
         ],
         "house_appliances": [
             ("custom_power", "FLOAT"),

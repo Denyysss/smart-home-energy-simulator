@@ -84,11 +84,17 @@
         <div class="home-top-grid">
           <div class="hero house-showcase">
             <div class="hs-top">
-              <span class="status"><i class="dot"></i> Онлайн</span>
-              <button class="hs-action" onclick="openHouseForm(activeHouse())" title="Редагувати будинок">
-                <i data-lucide="sliders-horizontal"></i>
-              </button>
+              <span class="status" id="heroPowerStatus"><i class="dot"></i> <span id="heroPowerText">Онлайн</span></span>
+              <div style="display:flex;gap:6px">
+                <button class="hs-action" onclick="openLiveGpvModal()" title="Живий графік Вінницяобленерго за адресою (Область, район, село, вулиця)">
+                  <i data-lucide="map-pin"></i>
+                </button>
+                <button class="hs-action" onclick="openHouseForm(activeHouse())" title="Редагувати будинок">
+                  <i data-lucide="sliders-horizontal"></i>
+                </button>
+              </div>
             </div>
+            <div class="hs-gpv-sub" id="heroGpvSub" style="display:none"></div>
 
             <div class="house-art-wrap" aria-hidden="true">
               <svg class="house-iso-svg" viewBox="0 0 360 230" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -120,7 +126,7 @@
                   </linearGradient>
                 </defs>
 
-                <ellipse cx="180" cy="135" rx="155" ry="82" fill="url(#yardGlow)"/>
+                <ellipse id="houseYardEllipse" cx="180" cy="135" rx="155" ry="82" fill="url(#yardGlow)"/>
                 <polygon points="180,46 322,124 180,206 38,124" fill="url(#lawnGrad)" stroke="#38BDF8" stroke-opacity="0.22" stroke-width="1.5"/>
                 <polygon points="180,54 310,124 180,198 50,124" fill="none" stroke="#FACC15" stroke-opacity="0.08" stroke-width="1"/>
 
@@ -139,18 +145,18 @@
                 <polygon points="102,94 185,140 185,186 102,140" fill="url(#wallLight)" stroke="#475569" stroke-opacity="0.45"/>
                 <polygon points="185,140 236,112 236,158 185,186" fill="url(#wallDark)" stroke="#334155" stroke-opacity="0.5"/>
 
-                <polygon points="114,122 138,135 138,155 114,142" fill="url(#winWarm)"/>
-                <polygon points="148,141 174,155 174,179 148,165" fill="url(#winWarm)"/>
-                <polygon points="196,150 222,136 222,154 196,168" fill="url(#winWarm)" opacity="0.88"/>
+                <polygon class="house-win-poly" points="114,122 138,135 138,155 114,142" fill="url(#winWarm)"/>
+                <polygon class="house-win-poly" points="148,141 174,155 174,179 148,165" fill="url(#winWarm)"/>
+                <polygon class="house-win-poly" points="196,150 222,136 222,154 196,168" fill="url(#winWarm)" opacity="0.88"/>
 
                 <polygon points="97,92 185,141 241,110 153,62" fill="#334155" stroke="#64748B" stroke-opacity="0.5"/>
 
                 <polygon points="108,64 185,106 185,138 108,96" fill="url(#wallLight)" stroke="#475569" stroke-opacity="0.45"/>
                 <polygon points="185,106 232,80 232,112 185,138" fill="url(#wallDark)" stroke="#334155" stroke-opacity="0.5"/>
 
-                <polygon points="118,77 144,91 144,110 118,96" fill="url(#winWarm)"/>
-                <polygon points="152,95 176,108 176,127 152,114" fill="url(#winWarm)"/>
-                <polygon points="195,107 221,93 221,110 195,124" fill="url(#winWarm)" opacity="0.85"/>
+                <polygon class="house-win-poly" points="118,77 144,91 144,110 118,96" fill="url(#winWarm)"/>
+                <polygon class="house-win-poly" points="152,95 176,108 176,127 152,114" fill="url(#winWarm)"/>
+                <polygon class="house-win-poly" points="195,107 221,93 221,110 195,124" fill="url(#winWarm)" opacity="0.85"/>
 
                 <polygon points="102,62 153,34 238,80 185,108" fill="url(#roofGrad)" stroke="#94A3B8" stroke-opacity="0.45" stroke-width="1.2"/>
                 <polygon points="136,56 164,41 206,64 178,79" fill="#0C2442" stroke="#38BDF8" stroke-opacity="0.65" stroke-width="1.2"/>
@@ -221,9 +227,9 @@
           <div class="card quick-panel">
             <b class="inline-ic"><i data-lucide="zap" class="ic-y"></i> Швидкі дії</b>
             <div class="quick vertical">
+              <button onclick="openLiveGpvModal()"><i><i data-lucide="radio"></i></i><span>Вінницяобленерго • Адреса і ГПВ</span></button>
               <button onclick="openApplianceForm()"><i><i data-lucide="plus"></i></i><span>Додати прилад</span></button>
               <button onclick="openHouseForm(activeHouse())"><i><i data-lucide="pencil"></i></i><span>Редагувати будинок</span></button>
-              <button onclick="setView('charts')"><i><i data-lucide="bar-chart-3"></i></i><span>Переглянути графіки</span></button>
               <button onclick="setView('analytics')"><i><i data-lucide="clock"></i></i><span>Аналітика витрат</span></button>
             </div>
           </div>
@@ -304,16 +310,17 @@
         <div class="card outage-card" id="outageCard">
           <div class="row-between" style="flex-wrap:wrap;gap:10px">
             <div>
-              <b class="inline-ic"><i data-lucide="power-off" class="ic-o"></i> Симулятор відключень світла (ГПВ) + Калькулятор EcoFlow / інвертора</b>
-              <small class="muted" style="margin:4px 0 0">Позначте години без світла або оберіть чергу ГПВ — система порахує втрачену енергію та підбере зарядну станцію.</small>
+              <b class="inline-ic"><i data-lucide="power-off" class="ic-o"></i> Живий графік відключень (Вінницяобленерго / ГПВ) + Калькулятор EcoFlow</b>
+              <small class="muted" style="margin:4px 0 0">Підключіть своє місто або село області — сайт автоматично виставлятиме та скасовуватиме відключення за фактичним станом обленерго.</small>
             </div>
             <div class="queue-pills">
+              <button class="btn-y sm-btn btn-ic" onclick="openLiveGpvModal()"><i data-lucide="radio"></i><span>Підключити адресу (Вінницяобленерго)</span></button>
               <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('none')"><i data-lucide="check-circle"></i><span>Без відключень</span></button>
-              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q1')"><i data-lucide="zap-off"></i><span>Черга 1 (08–12, 20–24)</span></button>
-              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q2')"><i data-lucide="zap-off"></i><span>Черга 2 (12–16, 00–04)</span></button>
-              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q3')"><i data-lucide="zap-off"></i><span>Черга 3 (16–20, 04–08)</span></button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q1')"><i data-lucide="zap-off"></i><span>Шаблон 1</span></button>
+              <button class="btn-g sm-btn btn-ic" onclick="setOutageQueue('q2')"><i data-lucide="zap-off"></i><span>Шаблон 2</span></button>
             </div>
           </div>
+          <div id="liveGpvBanner" class="gpv-live-banner" style="display:none"></div>
           <div class="outage-grid" id="outageGrid"></div>
           <div id="outageStats" class="outage-stats"></div>
         </div>

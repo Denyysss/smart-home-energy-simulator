@@ -451,3 +451,114 @@ def test_sixty_concurrent_guests_and_auto_cleanup():
             db.close()
 
 
+def test_katottg_vinnytsia_all_raions_and_villages():
+    """Перевірка довідника КАТОТТГ: усі 6 районів та ~1500 сіл/міст Вінницької області доступні для вибору."""
+    with TestClient(app) as client:
+        oblasts = client.get("/api/geo/oblasts").json()
+        assert len(oblasts) >= 20
+        assert oblasts[0]["name"] == "Вінницька"
+        assert oblasts[0]["has_live_gpv"] is True
+
+        raions = client.get("/api/geo/raions?oblast=Вінницька").json()
+        assert set(raions) == {
+            "Вінницький", "Гайсинський", "Жмеринський",
+            "Могилів-Подільський", "Тульчинський", "Хмільницький",
+        }
+
+        yakushyntsi = client.get("/api/geo/settlements?oblast=Вінницька&raion=Вінницький&q=Якушинці").json()
+        assert any("Якушинці" in s for s in yakushyntsi)
+
+        tulchyn = client.get("/api/geo/settlements?oblast=Вінницька&raion=Тульчинський&q=Вапнярка").json()
+        assert any("Вапнярка" in s for s in tulchyn)
+
+
+def test_live_voe_fact_auto_cancels_outage_at_14_01_and_remembers_village(monkeypatch):
+    """
+    Перевіряє головний кейс:
+    1) О 13:50 Вінницяобленерго у `fact` передає відключення з 14:00 до 16:00 для черги 2.2 -> сайт сам ставить [14, 15].
+    2) О 14:01 Вінницяобленерго скасовує відключення у `fact` ("yes") -> сайт сам прибирає [14, 15] і показує, що світло є!
+    3) Запам'ятовує чергу села/вулиці для наступних жителів цієї локації.
+    """
+    from datetime import datetime
+    import gpv_service
+    import main as main_mod
+
+    state_holder = {
+        "slots_2_2": ["yes"] * 14 + ["no", "no"] + ["yes"] * 8,  # 14:00-16:00 вимкнено
+        "slots_1_1": ["yes"] * 24,
+        "now": datetime(2026, 11, 24, 13, 50, tzinfo=gpv_service.KYIV_TZ),
+        "updated_at": "24.11.2026 13:41",
+    }
+
+    def fake_live_schedule(region: str = "vinnytsia", force_refresh: bool = False):
+        queues = {q: ["yes"] * 24 for q in gpv_service.STANDARD_12_QUEUES}
+        queues["2.2"] = list(state_holder["slots_2_2"])
+        queues["1.1"] = list(state_holder["slots_1_1"])
+        return {
+            "region": region,
+            "provider": "АТ «Вінницяобленерго» (e-svitlo.com.ua • fact)",
+            "updated_at": state_holder["updated_at"],
+            "queues": queues,
+            "tomorrow_queues": {},
+        }
+
+    monkeypatch.setattr(gpv_service, "get_live_region_schedule", fake_live_schedule)
+    monkeypatch.setattr(main_mod, "get_live_region_schedule", fake_live_schedule)
+    monkeypatch.setattr(gpv_service, "kyiv_now", lambda: state_holder["now"])
+
+    with TestClient(app) as client:
+        r_guest = client.post("/api/auth/guest")
+        tok = r_guest.json()["token"]
+        headers = {"Authorization": f"Bearer {tok}"}
+        hid = client.get("/api/houses", headers=headers).json()[0]["id"]
+
+        try:
+            # 1. Прив'язуємо с. Якушинці, вул. Шевченка, 12 до черги 2.2 о 13:50
+            r_bind = client.post(
+                f"/api/houses/{hid}/gpv-bind",
+                json={
+                    "oblast": "Вінницька",
+                    "raion": "Вінницький",
+                    "settlement": "с. Якушинці",
+                    "street": "вул. Шевченка",
+                    "house_num": "12",
+                    "gpv_queue": "2.2",
+                    "gpv_auto_sync": True,
+                },
+                headers=headers,
+            )
+            assert r_bind.status_code == 200
+            bound = r_bind.json()
+            assert "с. Якушинці" in bound["address"]
+            assert bound["outage_hours"] == [14, 15]
+            assert bound["live_gpv"]["has_power_now"] is True  # о 13:50 світло ще є
+
+            # 2. О 14:01 Вінницяобленерго скасовує відключення 14:00-16:00 (слоти стають "yes"!)
+            state_holder["now"] = datetime(2026, 11, 24, 14, 1, tzinfo=gpv_service.KYIV_TZ)
+            state_holder["slots_2_2"] = ["yes"] * 24
+            state_holder["updated_at"] = "24.11.2026 14:01"
+
+            r_sync = client.get(f"/api/houses/{hid}/gpv-sync?force=true", headers=headers)
+            assert r_sync.status_code == 200
+            synced = r_sync.json()
+            assert synced["outage_hours"] == []  # Відключення знято автоматично!
+            assert synced["live_gpv"]["has_power_now"] is True
+            assert synced["live_gpv"]["schedule_changed"] is True
+
+            # 3. Перевірка пам'яті адреси: інший житель с. Якушинці автоматично отримує збережену чергу 2.2
+            r_lookup = client.post(
+                "/api/gpv/lookup",
+                json={
+                    "oblast": "Вінницька",
+                    "raion": "Вінницький",
+                    "settlement": "с. Якушинці",
+                    "street": "вул. Шевченка",
+                },
+            )
+            assert r_lookup.status_code == 200
+            assert r_lookup.json()["remembered_queue"] == "2.2"
+        finally:
+            client.post("/api/auth/logout", headers=headers)
+
+
+
