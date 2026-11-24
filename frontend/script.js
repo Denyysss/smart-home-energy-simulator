@@ -1,25 +1,37 @@
 /**
  * script.js — ЕнергіяДім (SPA, інтегрований із SQLite БД через FastAPI)
- *
- * Структура:
- *   1. Конфігурація API (без хардкоду localhost) та Стан
- *   2. Універсальна модалка-форма openForm()
- *   3. Форми та CRUD-операції з БД (/api/houses, /api/houses/{id}/appliances)
- *   4. Виклик бекенду /api/simulate
- *   5. Рендер: shell та data
- *   6. Графіки Chart.js
- *   7. Навігація між сторінками
  */
 
 const NIGHT = new Set([23, 0, 1, 2, 3, 4, 5, 6]);
 const L24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
 const PALETTE = ["#FACC15", "#38BDF8", "#818CF8", "#22C55E", "#F97316", "#EC4899", "#14B8A6", "#A3E635", "#F43F5E", "#60A5FA"];
-const ICONS = {
-    "Бойлер 80л": "🚰", "Холодильник": "🧊", "Освітлення (кімната)": "💡", "Пральна машина": "🧺", "Мікрохвильовка": "📡",
-    "Кондиціонер": "❄️", "Телевізор": "📺", "Електрочайник": "☕", "Комп'ютер (ПК)": "🖥️", "Електроплита (1 конфорка)": "🍳",
-    "Посудомийна машина": "🍽️", "Зарядка електромобіля": "🚗"
+
+// Векторні іконки Lucide замість емодзі
+const LUCIDE_BY_NAME = {
+    "Бойлер 80л": "flame",
+    "Холодильник": "refrigerator",
+    "Освітлення (кімната)": "lightbulb",
+    "Пральна машина": "washing-machine",
+    "Мікрохвильовка": "microwave",
+    "Кондиціонер": "snowflake",
+    "Телевізор": "tv",
+    "Електрочайник": "coffee",
+    "Комп'ютер (ПК)": "monitor",
+    "Електроплита (1 конфорка)": "cooking-pot",
+    "Посудомийна машина": "sparkles",
+    "Зарядка електромобіля": "car-front"
 };
-const CAT_ICON = { heating: "🔥", cooling: "❄️", lighting: "💡", entertainment: "📺" };
+const LUCIDE_BY_CAT = {
+    heating: "flame",
+    cooling: "snowflake",
+    lighting: "lightbulb",
+    entertainment: "tv",
+    kitchen: "utensils",
+    laundry: "waves",
+    water: "droplets",
+    transport: "car-front"
+};
+
 const VIEWS = {
     home: ["Головна", "Огляд споживання вашого будинку"],
     houses: ["Мої будинки", "Керуйте будинками та відстежуйте споживання електроенергії (збережено в БД)"],
@@ -29,16 +41,24 @@ const VIEWS = {
     settings: ["Налаштування", "Профіль, тарифи, ліміти, графіки"],
 };
 
+function renderIcons(root = document) {
+    if (window.lucide && typeof window.lucide.createIcons === "function") {
+        window.lucide.createIcons({ root });
+    }
+}
+
+function lucideTag(name, cls = "") {
+    return `<i data-lucide="${esc(name)}"${cls ? ` class="${esc(cls)}"` : ""}></i>`;
+}
+
 // ============================================================
-// 1. АВТОВИЗНАЧЕННЯ API (без хардкоду localhost:8000) + СТАН
+// 1. АВТОВИЗНАЧЕННЯ API + СТАН
 // ============================================================
 function detectDefaultApi() {
     if (window.ENERGYDIM_API_URL !== undefined) return window.ENERGYDIM_API_URL;
-    // Якщо фронтенд роздається самим FastAPI або на продакшн-домені — використовуємо відносний шлях ""
     if (location.protocol.startsWith("http") && location.port !== "8080" && location.port !== "5500") {
         return "";
     }
-    // Якщо відкритий через окремий dev-сервер (наприклад, порт 8080)
     const host = location.hostname || "localhost";
     const proto = location.protocol === "https:" ? "https:" : "http:";
     return `${proto}//${host}:8000`;
@@ -47,7 +67,7 @@ function detectDefaultApi() {
 const KEY = "energydim.v3";
 function defaultState() {
     return {
-        auth: null, // { token, user: { id, name, username } }
+        auth: null,
         profile: { name: "Гість" },
         activeHouse: 1,
         settings: { api: detectDefaultApi(), showLimit: true, alerts: true, warnPercent: 80, chartMax: 0 },
@@ -76,14 +96,65 @@ let range = "day";
 let lastOverKey = null;
 
 // ============================================================
-// Утиліти
+// Утиліти та плавна анімація цифр
 // ============================================================
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = v => parseFloat(String(v).replace(",", "."));
 const fmt = (n, d = 2) => Number(n).toFixed(d);
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2200); }
-function iconOf(a) { return ICONS[a.name] || CAT_ICON[a.category] || "🔌"; }
+
+function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => t.classList.remove("show"), 2300);
+}
+
+function iconNameOf(a) {
+    return LUCIDE_BY_NAME[a.name] || LUCIDE_BY_CAT[a.category] || "plug";
+}
+function iconOf(a) {
+    return lucideTag(iconNameOf(a));
+}
+
+// Плавний перебіг числових значень (requestAnimationFrame)
+const _numAnim = new WeakMap();
+function animateNumber(el, target, decimals = 2, suffix = "", duration = 480) {
+    if (!el) return;
+    if (!Number.isFinite(target)) {
+        el.textContent = "—";
+        return;
+    }
+    const prev = _numAnim.get(el);
+    if (prev && prev.raf) cancelAnimationFrame(prev.raf);
+
+    const startVal = prev && Number.isFinite(prev.val) ? prev.val : 0;
+    if (Math.abs(target - startVal) < 0.001) {
+        el.textContent = fmt(target, decimals) + suffix;
+        _numAnim.set(el, { val: target, raf: null });
+        return;
+    }
+
+    const startTime = performance.now();
+    function step(now) {
+        const progress = Math.min(1, (now - startTime) / duration);
+        // easeOutQuart
+        const eased = 1 - Math.pow(1 - progress, 4);
+        const current = startVal + (target - startVal) * eased;
+        el.textContent = fmt(current, decimals) + suffix;
+        if (progress < 1) {
+            const raf = requestAnimationFrame(step);
+            _numAnim.set(el, { val: current, raf });
+        } else {
+            el.textContent = fmt(target, decimals) + suffix;
+            _numAnim.set(el, { val: target, raf: null });
+        }
+    }
+    const raf = requestAnimationFrame(step);
+    _numAnim.set(el, { val: startVal, raf });
+}
+
 function dailyKwh(a) { return a.power * a.duty * a.qty * a.schedule.length / 1000; }
 function scheduleText(s) {
     if (s.length === 24) return "Працює постійно";
@@ -95,7 +166,9 @@ function scheduleText(s) {
 }
 function addEvent(type, title, desc) {
     const time = new Date().toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
-    state.events.unshift({ type, title, desc, time });
+    // Прибираємо початкові емодзі із заголовка для чистоти UI
+    const cleanTitle = title.replace(/^[^\p{L}\p{N}]+/u, "").trim() || title;
+    state.events.unshift({ type, title: cleanTitle, desc, time });
     state.events = state.events.slice(0, 20);
 }
 
@@ -148,6 +221,7 @@ function openForm({ title, fields, onSave, saveText = "Зберегти", hideSa
                     ${f.step ? `step="${f.step}"` : ""} ${f.min !== undefined ? `min="${f.min}"` : ""} ${f.max !== undefined ? `max="${f.max}"` : ""}>${hint}`;
         }
     }).join("");
+    renderIcons($("mBody"));
     $("overlay").classList.add("show");
     const first = $("mBody").querySelector("input[type=text],input[type=number]");
     if (first) first.focus();
@@ -175,10 +249,10 @@ $("mSave").addEventListener("click", async () => {
     });
     try {
         const res = await modalCtx.onSave(v);
-        if (typeof res === "string") { toast("⚠️ " + res); return; }
+        if (typeof res === "string") { toast(res); return; }
         closeModal();
     } catch (err) {
-        toast("⚠️ Помилка: " + err.message);
+        toast("Помилка: " + err.message);
     }
 });
 
@@ -188,11 +262,11 @@ $("mSave").addEventListener("click", async () => {
 function openProfileForm() {
     const uname = state.auth?.user?.username ? `Логін: <b>${esc(state.auth.user.username)}</b>` : "";
     openForm({
-        title: "👤 Особистий профіль",
+        title: "Особистий профіль",
         fields: [
             { type: "html", key: "uinfo", html: uname ? `<div class="muted" style="margin:4px 0 10px">${uname}</div>` : "" },
             { key: "name", label: "Ваше ім'я", value: state.profile.name },
-            { type: "html", key: "logout", html: `<div style="margin-top:14px"><button type="button" class="btn-r" style="width:100%" onclick="closeModal();logoutUser()">🚪 Вийти з акаунта</button></div>` },
+            { type: "html", key: "logout", html: `<div style="margin-top:14px"><button type="button" class="btn-r" style="width:100%" onclick="closeModal();logoutUser()">Вийти з акаунта</button></div>` },
         ],
         onSave: async v => {
             const newName = v.name.trim();
@@ -213,7 +287,7 @@ function openProfileForm() {
 }
 function openTariffForm() {
     const h = activeHouse();
-    openForm({ title: "🕒 Тарифи на електроенергію", fields: [
+    openForm({ title: "Тарифи на електроенергію", fields: [
         { key: "day", label: "Денний тариф (07:00–23:00), грн/кВт·год", type: "number", step: "0.01", min: 0, value: h.dayRate },
         { key: "night", label: "Нічний тариф (23:00–07:00), грн/кВт·год", type: "number", step: "0.01", min: 0, value: h.nightRate } ],
         onSave: async v => {
@@ -224,14 +298,14 @@ function openTariffForm() {
                 body: JSON.stringify({ day_rate: d, night_rate: n }),
             });
             Object.assign(h, updated);
-            addEvent("info", "🕒 Змінено тарифи", `День ${d}, ніч ${n} грн`);
+            addEvent("info", "Змінено тарифи", `День ${d}, ніч ${n} грн`);
             await refresh();
             toast("Тарифи збережено в БД");
         } });
 }
 function openLimitForm() {
     const h = activeHouse();
-    openForm({ title: "⚡ Ліміт автомата", fields: [
+    openForm({ title: "Ліміт автомата", fields: [
         { key: "volt", label: "Напруга, В", type: "number", min: 100, max: 440, value: h.voltage },
         { key: "amps", label: "Автомат, А", type: "number", min: 1, max: 200, value: h.amps, hint: "Типові: 16 А = 3680 Вт, 25 А = 5750 Вт, 32 А = 7360 Вт" } ],
         onSave: async v => {
@@ -242,14 +316,14 @@ function openLimitForm() {
                 body: JSON.stringify({ voltage: a, amps: b, max_power_watt: a * b }),
             });
             Object.assign(h, updated);
-            addEvent("info", "⚡ Змінено ліміт", `${a * b} Вт`);
+            addEvent("info", "Змінено ліміт", `${a * b} Вт`);
             await refresh();
             toast("Ліміт збережено в БД");
         } });
 }
 function openChartForm() {
     const s = state.settings;
-    openForm({ title: "⏱️ Параметри графіків і сповіщень", fields: [
+    openForm({ title: "Параметри графіків і сповіщень", fields: [
         { key: "showLimit", type: "check", label: "Показувати лінію ліміту автомата", value: s.showLimit },
         { key: "alerts", type: "check", label: "Сповіщення про перевантаження", value: s.alerts },
         { key: "warn", label: "Попередження при навантаженні, % від ліміту", type: "number", min: 10, max: 100, value: s.warnPercent },
@@ -262,12 +336,12 @@ function openChartForm() {
         } });
 }
 function openApiForm() {
-    openForm({ title: "🔗 Адреса бекенду", fields: [{ key: "api", label: "URL (порожньо = поточний хост)", value: state.settings.api }],
+    openForm({ title: "Адреса бекенду", fields: [{ key: "api", label: "URL (порожньо = поточний хост)", value: state.settings.api }],
         onSave: async v => { state.settings.api = v.api.trim().replace(/\/+$/, ""); save(); await initFromDb(); } });
 }
 function openHouseForm(h) {
     const edit = !!h;
-    openForm({ title: edit ? "✏️ Редагувати будинок" : "🏠 Новий будинок", fields: [
+    openForm({ title: edit ? "Редагувати будинок" : "Новий будинок", fields: [
         { key: "name", label: "Назва", value: h?.name || "" },
         { key: "address", label: "Адреса", value: h?.address || "" },
         { key: "volt", label: "Напруга, В", type: "number", value: h?.voltage ?? 230 },
@@ -291,20 +365,20 @@ function openHouseForm(h) {
                 const created = await apiFetch("/api/houses", { method: "POST", body: JSON.stringify(payload) });
                 state.houses.push(created);
                 state.activeHouse = created.id;
-                addEvent("ok", "🏠 Додано будинок", created.name);
+                addEvent("ok", "Додано будинок", created.name);
             }
             await refresh();
             toast("Збережено в БД");
         } });
 }
 function openHouseSwitch() {
-    openForm({ title: "🏠 Обрати будинок", fields: [{ key: "id", type: "select", label: "Будинок", value: state.activeHouse, options: state.houses.map(h => ({ v: h.id, l: `${h.name} — ${h.address}` })) }],
+    openForm({ title: "Обрати будинок", fields: [{ key: "id", type: "select", label: "Будинок", value: state.activeHouse, options: state.houses.map(h => ({ v: h.id, l: `${h.name} — ${h.address}` })) }],
         onSave: v => { state.activeHouse = +v.id; refresh(); } });
 }
 function openApplianceForm(idx, preCat) {
-    if (!catalog.length) { toast("⚠️ Каталог не завантажено — перевірте бекенд"); }
+    if (!catalog.length) { toast("Каталог не завантажено — перевірте бекенд"); }
     const h = activeHouse(), a = idx !== undefined ? h.appliances[idx] : null;
-    openForm({ title: a ? "✏️ Редагувати прилад" : "➕ Додати прилад", fields: [
+    openForm({ title: a ? "Редагувати прилад" : "Додати прилад", fields: [
         { key: "cat", type: "select", label: "Прилад з каталогу", value: a?.catalogId ?? preCat ?? catalog[0]?.id, options: catalog.map(c => ({ v: c.id, l: `${c.name} (${c.power_watt} Вт)` })) },
         { key: "name", label: "Своя назва (необов'язково)", value: a && a.custom ? a.name : "" },
         { key: "power", label: "Своя потужність, Вт (порожньо = з каталогу)", type: "number", value: a && a.customPower ? a.power : "" },
@@ -347,14 +421,14 @@ function openApplianceForm(idx, preCat) {
                     }),
                 });
                 h.appliances.push(created);
-                addEvent("ok", "➕ Додано прилад", `${created.name}, ${created.power} Вт × ${created.qty}`);
+                addEvent("ok", "Додано прилад", `${created.name}, ${created.power} Вт × ${created.qty}`);
             }
             await refresh();
             toast(a ? "Прилад оновлено в БД" : "Прилад додано в БД");
         } });
 }
 function openEvents() {
-    openForm({ title: "🔔 Події", hideSave: true, fields: [{ type: "html", key: "ev", html: eventsHtml() }] });
+    openForm({ title: "Події системи", hideSave: true, fields: [{ type: "html", key: "ev", html: eventsHtml() }] });
 }
 async function resetAll() {
     if (!confirm("Скинути всі дані у базі даних та браузері до початкових?")) return;
@@ -371,11 +445,10 @@ async function resetAll() {
         await refresh();
         toast("Дані у БД скинуто");
     } catch (e) {
-        toast("⚠️ Не вдалося скинути БД: " + e.message);
+        toast("Не вдалося скинути БД: " + e.message);
     }
 }
 
-// Дії над приладами / будинками (синхронізовані з БД)
 async function toggleAppliance(i) {
     const h = activeHouse(), a = h.appliances[i];
     a.enabled = !a.enabled;
@@ -386,7 +459,7 @@ async function toggleAppliance(i) {
         });
         h.appliances[i] = updated;
     } catch (e) {
-        toast("⚠️ " + e.message);
+        toast(e.message);
     }
     await refresh();
 }
@@ -396,15 +469,15 @@ async function deleteAppliance(i) {
     try {
         await apiFetch(`/api/houses/${h.id}/appliances/${a.id}`, { method: "DELETE" });
         h.appliances.splice(i, 1);
-        addEvent("neutral", "🗑️ Видалено прилад", a.name);
+        addEvent("neutral", "Видалено прилад", a.name);
         await refresh();
     } catch (e) {
-        toast("⚠️ " + e.message);
+        toast(e.message);
     }
 }
 function selectHouse(id) { state.activeHouse = id; refresh(); toast("Будинок обрано"); }
 async function deleteHouse(id) {
-    if (state.houses.length < 2) { toast("⚠️ Має лишитись хоча б один будинок"); return; }
+    if (state.houses.length < 2) { toast("Має лишитись хоча б один будинок"); return; }
     const h = state.houses.find(x => x.id === id);
     if (!confirm(`Видалити будинок «${h.name}»?`)) return;
     try {
@@ -413,7 +486,7 @@ async function deleteHouse(id) {
         if (state.activeHouse === id) state.activeHouse = state.houses[0].id;
         await refresh();
     } catch (e) {
-        toast("⚠️ " + e.message);
+        toast(e.message);
     }
 }
 
@@ -427,13 +500,15 @@ function switchAuthTab(mode) {
     $("authTabLogin").classList.toggle("active", mode === "login");
     $("authTabReg").classList.toggle("active", mode === "register");
     $("authNameWrap").style.display = mode === "register" ? "block" : "none";
-    $("authSubmitBtn").textContent = mode === "register" ? "Створити акаунт" : "Увійти";
+    const btnSpan = $("authSubmitBtn").querySelector("span");
+    if (btnSpan) btnSpan.textContent = mode === "register" ? "Створити акаунт" : "Увійти в систему";
     $("authErr").style.display = "none";
 }
 
 function showAuthScreen() {
     $("authErr").style.display = "none";
     $("authScreen").classList.add("show");
+    renderIcons($("authScreen"));
 }
 
 function hideAuthScreen() {
@@ -453,6 +528,9 @@ async function submitAuth(e) {
         return;
     }
 
+    const submitBtn = $("authSubmitBtn");
+    submitBtn.disabled = true;
+
     try {
         const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
         const body = authMode === "register" ? { name, username, password } : { username, password };
@@ -468,11 +546,16 @@ async function submitAuth(e) {
     } catch (err) {
         $("authErr").textContent = err.message;
         $("authErr").style.display = "block";
+    } finally {
+        submitBtn.disabled = false;
     }
 }
 
 async function quickDemoLogin() {
     $("authErr").style.display = "none";
+    const demoBtn = $("authDemoBtn");
+    demoBtn.disabled = true;
+
     const id = Date.now().toString(36).slice(-5);
     const username = `guest_${id}`;
     const password = `demo_${id}`;
@@ -493,6 +576,8 @@ async function quickDemoLogin() {
     } catch (err) {
         $("authErr").textContent = err.message;
         $("authErr").style.display = "block";
+    } finally {
+        demoBtn.disabled = false;
     }
 }
 
@@ -568,7 +653,7 @@ async function refresh() {
         const key = activeHouse().id + ":" + sim.overload_hours.map(o => o.hour).join(",");
         if (key !== lastOverKey) {
             if (lastOverKey !== null && sim.overload_hours.length) {
-                addEvent("warn", "⚠️ Перевищення ліміту", `Ліміт ${limitOf(activeHouse())} Вт, години: ${sim.overload_hours.map(o => o.hour + ":00").join(", ")}`);
+                addEvent("warn", "Перевищення ліміту", `Ліміт ${limitOf(activeHouse())} Вт, години: ${sim.overload_hours.map(o => o.hour + ":00").join(", ")}`);
             }
             lastOverKey = key; save();
         }
@@ -579,14 +664,22 @@ async function refresh() {
 // ============================================================
 // 5. РЕНДЕР
 // ============================================================
+const EV_ICON = { warn: "alert-triangle", ok: "check-circle-2", info: "info", neutral: "bell" };
+
 function eventsHtml() {
     if (!state.events.length) return `<div class="empty">Подій поки немає</div>`;
-    return state.events.map(e => `<div class="ev"><div class="ev-i ${e.type}">${e.title.split(" ")[0]}</div><div class="grow"><div class="ev-t">${esc(e.title.split(" ").slice(1).join(" "))}</div><div class="ev-d">${esc(e.desc)}</div></div><span class="ev-time">${e.time}</span></div>`).join("");
+    return state.events.map(e => {
+        const ic = EV_ICON[e.type] || "bell";
+        return `<div class="ev"><div class="ev-i ${e.type}">${lucideTag(ic)}</div><div class="grow"><div class="ev-t">${esc(e.title)}</div><div class="ev-d">${esc(e.desc)}</div></div><span class="ev-time">${e.time}</span></div>`;
+    }).join("");
 }
+
 function renderShell() {
     const h = activeHouse(), q = $("searchInput").value.trim().toLowerCase();
     $("profileName").textContent = state.profile.name; $("avatar").textContent = (state.profile.name[0] || "?").toUpperCase();
-    $("heroName").textContent = h.name; $("heroAddr").textContent = "📍 " + (h.address || "адресу не вказано");
+    $("heroName").textContent = h.name;
+    const addrSpan = $("heroAddr").querySelector("span");
+    if (addrSpan) addrSpan.textContent = h.address || "адресу не вказано";
     $("hsName").textContent = h.address || h.name;
     $("rsTariff").textContent = `День: ${h.dayRate} / Ніч: ${h.nightRate} грн`; $("rsLimit").textContent = `${limitOf(h)} Вт (${h.voltage} В × ${h.amps} А)`;
     $("sProfile").textContent = `Ім'я: ${state.profile.name}` + (state.auth?.user?.username ? ` • Логін: ${state.auth.user.username}` : "");
@@ -604,42 +697,57 @@ function renderShell() {
 
     $("appGrid").innerHTML = h.appliances.length ? h.appliances.map((a, i) => `<div class="item ${a.enabled ? "" : "off"}"><div class="ic ${a.category}">${iconOf(a)}</div>
         <div class="grow"><div class="it-n">${esc(a.name)}</div><div class="it-d">${a.power} Вт • ${a.qty} шт.${a.cyclic ? " • цикл " + Math.round(a.duty * 100) + "%" : ""}</div>
-        <div class="it-d">🕐 ${scheduleText(a.schedule)}</div><div class="it-k">${fmt(dailyKwh(a), 2)} кВт·год/день</div></div>
+        <div class="it-d">${lucideTag("clock")} <span>${scheduleText(a.schedule)}</span></div><div class="it-k">${fmt(dailyKwh(a), 2)} кВт·год/день</div></div>
         <label class="tg"><input type="checkbox" ${a.enabled ? "checked" : ""} onchange="toggleAppliance(${i})"><span></span></label>
-        <button class="mini" onclick="openApplianceForm(${i})">✏️</button><button class="mini del" onclick="deleteAppliance(${i})">🗑️</button></div>`).join("")
+        <button class="mini" onclick="openApplianceForm(${i})" title="Редагувати">${lucideTag("pencil")}</button>
+        <button class="mini del" onclick="deleteAppliance(${i})" title="Видалити">${lucideTag("trash-2")}</button></div>`).join("")
         : `<div class="empty">Приладів ще немає. Натисніть «+ Додати прилад».</div>`;
 
     const hs = state.houses.filter(x => !q || (x.name + " " + x.address).toLowerCase().includes(q));
-    $("housesList").innerHTML = hs.length ? hs.map(x => `<div class="item ${x.id === h.id ? "active-house" : ""}"><div class="ic">🏠</div>
-        <div class="grow"><div class="it-n">${esc(x.name)} ${x.id === h.id ? '<small class="green">● обрано</small>' : ""}</div><div class="it-d">📍 ${esc(x.address || "—")}</div>
+    $("housesList").innerHTML = hs.length ? hs.map(x => `<div class="item ${x.id === h.id ? "active-house" : ""}"><div class="ic">${lucideTag("home")}</div>
+        <div class="grow"><div class="it-n">${esc(x.name)} ${x.id === h.id ? '<small class="green">● обрано</small>' : ""}</div><div class="it-d">${lucideTag("map-pin")} <span>${esc(x.address || "—")}</span></div>
         <div class="it-d">${x.appliances.length} приладів • ліміт ${limitOf(x)} Вт</div><div class="it-d">Тарифи: ${x.dayRate} / ${x.nightRate} грн</div><div class="it-k">≈ ${fmt(estimate(x).kwh, 1)} кВт·год • ${fmt(estimate(x).cost, 1)} грн / доба</div></div>
         ${x.id === h.id ? "" : `<button class="mini" onclick="selectHouse(${x.id})">Обрати</button>`}
-        <button class="mini" onclick="openHouseForm(state.houses.find(z=>z.id===${x.id}))">✏️</button><button class="mini del" onclick="deleteHouse(${x.id})">🗑️</button></div>`).join("")
+        <button class="mini" onclick="openHouseForm(state.houses.find(z=>z.id===${x.id}))" title="Редагувати">${lucideTag("pencil")}</button>
+        <button class="mini del" onclick="deleteHouse(${x.id})" title="Видалити">${lucideTag("trash-2")}</button></div>`).join("")
         : `<div class="empty">Нічого не знайдено</div>`;
     $("eventsList").innerHTML = eventsHtml();
     renderShellExtras(h);
+    renderIcons();
 }
 
 function renderData() {
     const h = activeHouse(), s = state.settings, L = limitOf(h);
     if (!sim) { drawAll(); return; }
     let dk = 0, nk = 0; sim.hourly_kwh.forEach((k, i) => NIGHT.has(i) ? nk += k : dk += k);
-    $("kKwh").textContent = fmt(sim.total_kwh); $("kCost").textContent = fmt(sim.total_cost); $("kSplit").textContent = `${fmt(dk)} / ${fmt(nk)}`;
+
+    // Плавна анімація головних KPI-цифр
+    animateNumber($("kKwh"), sim.total_kwh, 2);
+    animateNumber($("kCost"), sim.total_cost, 2);
+    $("kSplit").textContent = `${fmt(dk)} / ${fmt(nk)}`;
+
     const pct = L ? sim.peak_watt / L * 100 : 0, over = sim.overload_hours.length > 0, warn = !over && pct >= s.warnPercent;
     $("gBar").style.width = Math.min(100, pct) + "%"; $("gBar").className = "bar-fill " + (over ? "bad" : warn ? "warn" : "");
-    $("gBadge").className = "pill " + (over ? "bad" : warn ? "warn" : "ok"); $("gBadge").textContent = over ? "🔴 Перевантаження" : warn ? "🟠 Близько до ліміту" : "🟢 Нормальне";
+    $("gBadge").className = "pill " + (over ? "bad" : warn ? "warn" : "ok");
+    $("gBadge").textContent = over ? "Перевантаження" : warn ? "Близько до ліміту" : "Нормальне";
     $("gText").textContent = `Пік ${fmt(sim.peak_watt, 0)} Вт о ${sim.peak_hour}:00 / ліміт ${L} Вт (${fmt(pct, 0)}%)`;
     $("overBanner").style.display = over && s.alerts ? "block" : "none";
     $("overText").textContent = `Автомат вибиває. Ліміт ${L} Вт, перевищення у годинах: ${sim.overload_hours.map(o => o.hour + ":00").join(", ")}.`;
-    $("okBanner").style.display = !over ? "block" : "none"; $("okBanner").textContent = `✅ Навантаження в нормі. Пік ${fmt(sim.peak_watt, 0)} Вт (ліміт ${L} Вт).`;
+    $("okBanner").style.display = !over ? "block" : "none";
+    $("okBanner").innerHTML = `<span class="inline-ic">${lucideTag("check-circle-2")} <span>Навантаження в нормі. Пік ${fmt(sim.peak_watt, 0)} Вт (ліміт ${L} Вт).</span></span>`;
     const b = $("bellBadge"); b.textContent = s.alerts ? sim.overload_hours.length : 0; b.classList.toggle("zero", !(s.alerts && sim.overload_hours.length));
-    $("tKwh").textContent = fmt(sim.total_kwh, 1); $("tCost").textContent = fmt(sim.total_cost, 1); $("tPeak").textContent = fmt(sim.peak_watt, 0);
+
+    animateNumber($("tKwh"), sim.total_kwh, 1);
+    animateNumber($("tCost"), sim.total_cost, 1);
+    animateNumber($("tPeak"), sim.peak_watt, 0);
     $("tCount").textContent = h.appliances.filter(a => a.enabled).length + "/" + h.appliances.length;
+
     $("eventsList").innerHTML = eventsHtml();
     renderAnalytics(h, dk, nk);
     renderMeterAndSolar();
     renderOutagePanel(h);
     renderExtras(h, dk, nk);
+    renderIcons();
     drawAll();
     setupScrollMotion();
     previewOptimization(false);
@@ -647,7 +755,8 @@ function renderData() {
 
 function renderAnalytics(h, dk, nk) {
     const mk = sim.total_kwh * 30, mc = sim.total_cost * 30;
-    $("aMonthKwh").textContent = fmt(mk, 0); $("aMonthCost").textContent = fmt(mc, 0);
+    animateNumber($("aMonthKwh"), mk, 0);
+    animateNumber($("aMonthCost"), mc, 0);
     const rows = sim.per_appliance.map(p => {
         let kwh = 0, cost = 0;
         p.hourly_watt.forEach((w, i) => { const k = w / 1000; kwh += k; cost += k * (NIGHT.has(i) ? h.nightRate : h.dayRate); });
@@ -655,16 +764,16 @@ function renderAnalytics(h, dk, nk) {
     }).sort((a, b) => b.kwh - a.kwh);
     let saveCost = 0;
     sim.per_appliance.forEach(p => { if (p.power_watt >= 1000) p.hourly_watt.forEach((w, i) => { if (!NIGHT.has(i)) saveCost += w / 1000 * (h.dayRate - h.nightRate); }); });
-    $("aSave").textContent = fmt(Math.max(0, saveCost * 30), 0) + " грн/міс";
+    animateNumber($("aSave"), Math.max(0, saveCost * 30), 0, " грн/міс");
     $("aTable").innerHTML = rows.length ? `<table><tr><th>Прилад</th><th>кВт·год</th><th>грн/доба</th><th>грн/міс</th></tr>${rows.map(r =>
         `<tr><td>${esc(r.name)}</td><td>${fmt(r.kwh)}</td><td>${fmt(r.cost)}</td><td>${fmt(r.cost * 30, 0)}</td></tr>`).join("")}</table>` : `<div class="empty">Немає даних</div>`;
     const tips = [];
-    if (sim.overload_hours.length) tips.push(`⚠️ Автомат вибиває у ${sim.overload_hours.map(o => o.hour + ":00").join(", ")}. Розведіть потужні прилади по різних годинах або збільште номінал автомата.`);
-    if (rows[0] && sim.total_kwh) tips.push(`🔥 Найбільше споживає «${rows[0].name}» — ${fmt(rows[0].kwh / sim.total_kwh * 100, 0)}% добового споживання.`);
-    if (sim.total_kwh && dk / sim.total_kwh > 0.7) tips.push(`🌙 ${fmt(dk / sim.total_kwh * 100, 0)}% енергії споживається вдень. Перенесення потужних приладів (бойлер, пральна машина) на ніч заощадить ≈ ${fmt(saveCost * 30, 0)} грн/міс.`);
-    if (h.dayRate && h.nightRate && h.nightRate < h.dayRate) tips.push(`💰 Нічний тариф дешевший у ${fmt(h.dayRate / h.nightRate, 1)} раза.`);
-    if (!tips.length) tips.push("✅ Все добре! Додайте більше приладів, щоб побачити поради.");
-    $("aTips").innerHTML = tips.map(t => `<div class="tip">${t}</div>`).join("");
+    if (sim.overload_hours.length) tips.push(["alert-triangle", "ic-r", `Автомат вибиває у ${sim.overload_hours.map(o => o.hour + ":00").join(", ")}. Розведіть потужні прилади по різних годинах або збільште номінал автомата.`]);
+    if (rows[0] && sim.total_kwh) tips.push(["flame", "ic-o", `Найбільше споживає «${rows[0].name}» — ${fmt(rows[0].kwh / sim.total_kwh * 100, 0)}% добового споживання.`]);
+    if (sim.total_kwh && dk / sim.total_kwh > 0.7) tips.push(["moon", "ic-p", `${fmt(dk / sim.total_kwh * 100, 0)}% енергії споживається вдень. Перенесення потужних приладів (бойлер, пральна машина) на ніч заощадить ≈ ${fmt(saveCost * 30, 0)} грн/міс.`]);
+    if (h.dayRate && h.nightRate && h.nightRate < h.dayRate) tips.push(["banknote", "ic-g", `Нічний тариф дешевший у ${fmt(h.dayRate / h.nightRate, 1)} раза.`]);
+    if (!tips.length) tips.push(["check-circle-2", "ic-g", "Все добре! Додайте більше приладів, щоб побачити поради."]);
+    $("aTips").innerHTML = tips.map(([ic, cls, t]) => `<div class="tip">${lucideTag(ic, cls)}<span>${t}</span></div>`).join("");
     window._rows = rows;
 }
 
@@ -703,18 +812,18 @@ function drawBase() {
     if (!sim) return;
     const L = limitOf(h), ymax = state.settings.chartMax;
     const outSet = new Set(sim.outage_hours || h.outageHours || []);
-    const tip = { callbacks: { label: c => `${fmt(c.parsed.y, 0)} Вт`, afterLabel: c => outSet.has(c.dataIndex) ? "🕯️ Відключення світла (ГПВ)" : (NIGHT.has(c.dataIndex) ? "🌙 Ніч" : "☀️ День") } };
-    const hourlyCfg = () => ({ type: "bar", data: { labels: L24, datasets: [{ data: sim.hourly_watt, backgroundColor: hourColors(), borderRadius: 3, barPercentage: .75 }] },
+    const tip = { callbacks: { label: c => `${fmt(c.parsed.y, 0)} Вт`, afterLabel: c => outSet.has(c.dataIndex) ? "Відключення світла (ГПВ)" : (NIGHT.has(c.dataIndex) ? "Ніч" : "День") } };
+    const hourlyCfg = () => ({ type: "bar", data: { labels: L24, datasets: [{ data: sim.hourly_watt, backgroundColor: hourColors(), borderRadius: 4, barPercentage: .75 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, annotation: { annotations: limitAnn(L) }, tooltip: tip }, scales: axes("Вт", ymax) } });
     mkChart("chartHome", hourlyCfg());
 
     const n = range === "week" ? 7 : 30;
     $("rangeNote").textContent = range === "day" ? "Споживання по годинах за добу." : `Прогноз за поточним розкладом: кожна доба = ${fmt(sim.total_kwh)} кВт·год.`;
     if (range === "day") mkChart("chartWatt", hourlyCfg());
-    else mkChart("chartWatt", { type: "bar", data: { labels: Array.from({ length: n }, (_, i) => `${i + 1}`), datasets: [{ data: Array(n).fill(sim.total_kwh), backgroundColor: "#FACC15", borderRadius: 3 }] },
+    else mkChart("chartWatt", { type: "bar", data: { labels: Array.from({ length: n }, (_, i) => `${i + 1}`), datasets: [{ data: Array(n).fill(sim.total_kwh), backgroundColor: "#FACC15", borderRadius: 4 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${fmt(c.parsed.y)} кВт·год` } } }, scales: axes("кВт·год") } });
 
-    mkChart("chartCost", { type: "bar", data: { labels: L24, datasets: [{ data: sim.hourly_cost, backgroundColor: L24.map((_, i) => NIGHT.has(i) ? "#818CF8" : "#22C55E"), borderRadius: 3, barPercentage: .75 }] },
+    mkChart("chartCost", { type: "bar", data: { labels: L24, datasets: [{ data: sim.hourly_cost, backgroundColor: L24.map((_, i) => NIGHT.has(i) ? "#818CF8" : "#22C55E"), borderRadius: 4, barPercentage: .75 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${fmt(c.parsed.y, 3)} грн` } } }, scales: axes("грн") } });
 
     mkChart("chartStack", { type: "bar", data: { labels: L24, datasets: sim.per_appliance.map((p, i) => ({ label: p.name, data: p.hourly_watt, backgroundColor: PALETTE[i % PALETTE.length], borderRadius: 2 })) },
@@ -722,7 +831,7 @@ function drawBase() {
             scales: { x: { ...axes("").x, stacked: true }, y: { ...axes("Вт", ymax).y, stacked: true } } } });
 
     const rows = window._rows || [];
-    mkChart("chartShare", { type: "doughnut", data: { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => +r.kwh.toFixed(3)), backgroundColor: rows.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: "#162238", borderWidth: 2 }] },
+    mkChart("chartShare", { type: "doughnut", data: { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => +r.kwh.toFixed(3)), backgroundColor: rows.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: "#141F35", borderWidth: 2 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "right", labels: { color: "#94A3B8", boxWidth: 10, font: { size: 11 } } }, tooltip: { callbacks: { label: c => `${c.label}: ${fmt(c.parsed)} кВт·год` } } } } });
 }
 
@@ -761,14 +870,14 @@ function renderShellExtras(h) {
     const on = h.appliances.filter(a => a.enabled);
     const inst = h.appliances.reduce((s, a) => s + a.power * a.qty, 0), e = estimate(h);
     $("appSum").innerHTML = `
-        <div class="kpi"><div class="kpi-ic y">🔌</div><div class="kpi-v">${on.length}/${h.appliances.length}</div><div class="kpi-l">приладів увімкнено</div></div>
-        <div class="kpi"><div class="kpi-ic b">⚡</div><div class="kpi-v">${fmt(inst / 1000, 1)} кВт</div><div class="kpi-l">встановлена потужність</div></div>
-        <div class="kpi"><div class="kpi-ic p">📊</div><div class="kpi-v">${fmt(e.kwh, 1)}</div><div class="kpi-l">кВт·год за добу (оцінка)</div></div>`;
+        <div class="kpi"><div class="kpi-ic y">${lucideTag("plug-zap")}</div><div class="kpi-v num">${on.length}/${h.appliances.length}</div><div class="kpi-l">приладів увімкнено</div></div>
+        <div class="kpi"><div class="kpi-ic b">${lucideTag("zap")}</div><div class="kpi-v num">${fmt(inst / 1000, 1)} кВт</div><div class="kpi-l">встановлена потужність</div></div>
+        <div class="kpi"><div class="kpi-ic p">${lucideTag("bar-chart-2")}</div><div class="kpi-v num">${fmt(e.kwh, 1)}</div><div class="kpi-l">кВт·год за добу (оцінка)</div></div>`;
     const load = hourlyLoad(h), mx = Math.max(1, ...load);
     const outSet = new Set(h.outageHours || h.outage_hours || []);
     $("timeline").innerHTML = h.appliances.length
         ? `<div class="tl-h"><span></span><div>${L24.map((l, i) => `<span>${i % 3 === 0 ? i : ""}</span>`).join("")}</div></div>` +
-          h.appliances.map((a, appIdx) => `<div class="tl-r" style="${a.enabled ? "" : "opacity:.4"}"><span class="tl-n">${iconOf(a)} ${esc(a.name)}</span><div class="tl-c">${L24.map((l, i) => {
+          h.appliances.map((a, appIdx) => `<div class="tl-r" style="${a.enabled ? "" : "opacity:.4"}"><span class="tl-n">${iconOf(a)} <span>${esc(a.name)}</span></span><div class="tl-c">${L24.map((l, i) => {
               const on = a.schedule.includes(i);
               const cls = (on ? (NIGHT.has(i) ? "n" : "d") : "") + (outSet.has(i) ? " out" : "");
               return `<i data-tl-app="${appIdx}" data-tl-hr="${i}" class="${cls.trim()}" title="${esc(a.name)} — ${l} (${on ? "увімкнено" : "вимкнено"}${outSet.has(i) ? ", ГПВ" : ""}). Клікніть для перемикання"></i>`;
@@ -776,7 +885,10 @@ function renderShellExtras(h) {
           `<div class="tl-r"><span class="tl-n"><b>Σ Потужність</b></span><div class="tl-c">${load.map((w, i) =>
               `<i title="${L24[i]}: ${outSet.has(i) ? "0 Вт (відключення ГПВ)" : fmt(w, 0) + " Вт"}" style="background:${outSet.has(i) ? "rgba(239,68,68,.2)" : "rgba(239,68,68," + (0.12 + 0.88 * w / mx).toFixed(2) + ")"}"></i>`).join("")}</div></div>`
         : `<div class="empty">Додайте прилади, щоб побачити розклад</div>`;
-    $("gallery").innerHTML = catalog.length ? catalog.map(c => `<button onclick="openApplianceForm(undefined, ${c.id})"><i>${ICONS[c.name] || CAT_ICON[c.category] || "🔌"}</i><b>${esc(c.name)}</b><small>${c.power_watt} Вт${c.is_cyclic ? " • цикл " + Math.round(c.duty_cycle * 100) + "%" : ""}</small></button>`).join("")
+    $("gallery").innerHTML = catalog.length ? catalog.map(c => {
+        const ic = LUCIDE_BY_NAME[c.name] || LUCIDE_BY_CAT[c.category] || "plug";
+        return `<button onclick="openApplianceForm(undefined, ${c.id})"><i>${lucideTag(ic)}</i><b>${esc(c.name)}</b><small>${c.power_watt} Вт${c.is_cyclic ? " • цикл " + Math.round(c.duty_cycle * 100) + "%" : ""}</small></button>`;
+    }).join("")
         : `<div class="empty">Каталог недоступний (перевірте бекенд)</div>`;
 }
 function renderExtras(h, dk, nk) {
@@ -807,7 +919,7 @@ function drawExtra() {
     if (!sim) return;
     const h = activeHouse(), L = limitOf(h);
     let dk = 0, nk = 0; sim.hourly_kwh.forEach((k, i) => NIGHT.has(i) ? nk += k : dk += k);
-    mkChart("chartDN", { type: "doughnut", data: { labels: ["День", "Ніч"], datasets: [{ data: [+dk.toFixed(3), +nk.toFixed(3)], backgroundColor: ["#FACC15", "#818CF8"], borderColor: "#162238", borderWidth: 2 }] },
+    mkChart("chartDN", { type: "doughnut", data: { labels: ["День", "Ніч"], datasets: [{ data: [+dk.toFixed(3), +nk.toFixed(3)], backgroundColor: ["#FACC15", "#818CF8"], borderColor: "#141F35", borderWidth: 2 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "right", labels: { color: "#94A3B8", boxWidth: 10 } }, tooltip: { callbacks: { label: c => `${c.label}: ${fmt(c.parsed)} кВт·год` } } } } });
     mkChart("chartLine", { type: "line", data: { labels: L24, datasets: [{ data: sim.hourly_watt, borderColor: "#38BDF8", backgroundColor: "rgba(56,189,248,.18)", fill: true, tension: .3, pointRadius: 2, stepped: false }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, annotation: { annotations: limitAnn(L) }, tooltip: { callbacks: { label: c => `${fmt(c.parsed.y, 0)} Вт` } } }, scales: axes("Вт", state.settings.chartMax) } });
@@ -873,7 +985,7 @@ function buildOptSummaryHtml(opt) {
     const headline = `До оптимізації: <span class="opt-before">${fmt(b.total_cost)} грн (${overloadLabel(b.overload_count)})</span> → Після: <span class="opt-after">${fmt(a.total_cost)} грн (${overloadLabel(a.overload_count)}, <span class="opt-save">економія ${fmt(opt.saved_monthly_uah, 0)} грн/міс</span>)</span>`;
     const rowsHtml = changed.length
         ? changed.map(c => `<div class="opt-change-row"><b>${esc(c.name)}</b><span>${shortHours(c.old_schedule)} <span class="opt-arrow">→</span> <span style="color:#86EFAC;font-weight:600">${shortHours(c.new_schedule)}</span></span></div>`).join("")
-        : `<div class="opt-change-row"><span style="color:#86EFAC">✅ Розклад уже максимально оптимізовано! Усі гнучкі потужні прилади працюють у нічній зоні (23:00–07:00) без перевантажень.</span></div>`;
+        : `<div class="opt-change-row"><span style="color:#86EFAC">Розклад уже максимально оптимізовано! Усі гнучкі потужні прилади працюють у нічній зоні (23:00–07:00) без перевантажень.</span></div>`;
     return { headline, rowsHtml, hasChanges: changed.length > 0 };
 }
 
@@ -890,22 +1002,22 @@ async function previewOptimization(userClicked = false) {
         if (userClicked) {
             if (!$("view-home").classList.contains("active")) setView("home");
             $("optCard").scrollIntoView({ behavior: "smooth", block: "center" });
-            if (!hasChanges) toast("✅ Розклад уже оптимальний!");
+            if (!hasChanges) toast("Розклад уже оптимальний!");
         }
     } catch (e) {
-        if (userClicked) toast("⚠️ Помилка оптимізації: " + e.message);
+        if (userClicked) toast("Помилка оптимізації: " + e.message);
     }
 }
 
 async function openOptimizeModal() {
     try {
         const opt = await fetchOptimization();
-        if (!opt) { toast("⚠️ Додайте та увімкніть прилади"); return; }
+        if (!opt) { toast("Додайте та увімкніть прилади"); return; }
         lastOptimization = opt;
         const { headline, rowsHtml, hasChanges } = buildOptSummaryHtml(opt);
         openForm({
-            title: "✨ Розумний оптимізатор розкладу",
-            saveText: "✅ Застосувати",
+            title: "Розумний оптимізатор розкладу",
+            saveText: "Застосувати",
             hideSave: !hasChanges,
             fields: [{
                 type: "html",
@@ -915,7 +1027,7 @@ async function openOptimizeModal() {
             onSave: async () => { await applyOptimization(); },
         });
     } catch (e) {
-        toast("⚠️ " + e.message);
+        toast(e.message);
     }
 }
 
@@ -929,22 +1041,22 @@ async function applyOptimization() {
             const byId = new Map(lastOptimization.changes.map(c => [c.id, c.new_schedule]));
             h.appliances.forEach(a => { if (byId.has(a.id)) a.schedule = byId.get(a.id); });
         }
-        addEvent("ok", "✨ Розклад оптимізовано", `Після: ${fmt(res.after.total_cost)} грн/доба (економія ${fmt(res.saved_monthly_uah, 0)} грн/міс)`);
+        addEvent("ok", "Розклад оптимізовано", `Після: ${fmt(res.after.total_cost)} грн/доба (економія ${fmt(res.saved_monthly_uah, 0)} грн/міс)`);
         await refresh();
-        toast(`✨ Застосовано! Економія ${fmt(res.saved_monthly_uah, 0)} грн/міс`);
+        toast(`Застосовано! Економія ${fmt(res.saved_monthly_uah, 0)} грн/міс`);
     } catch (e) {
-        toast("⚠️ Не вдалося застосувати: " + e.message);
+        toast("Не вдалося застосувати: " + e.message);
     }
 }
 $("importFile").addEventListener("change", e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
-    r.onload = () => { try { const s = JSON.parse(r.result); if (!Array.isArray(s.houses) || !s.houses.length) throw 0; state = { ...defaultState(), ...s }; save(); refresh(); toast("Імпортовано"); } catch (err) { toast("⚠️ Некоректний файл"); } };
+    r.onload = () => { try { const s = JSON.parse(r.result); if (!Array.isArray(s.houses) || !s.houses.length) throw 0; state = { ...defaultState(), ...s }; save(); refresh(); toast("Імпортовано"); } catch (err) { toast("Некоректний файл"); } };
     r.readAsText(f); e.target.value = "";
 });
 
 // ============================================================
-// 9. MOTION DESIGN: SCROLL REVEAL, PARALLAX & CURSOR SPOTLIGHT
+// 9. MOTION DESIGN: SCROLL REVEAL & CURSOR SPOTLIGHT
 // ============================================================
 let scrollObserver = null;
 
@@ -954,7 +1066,6 @@ function setupScrollMotion() {
     const targets = activeView.querySelectorAll(".hero, .page-hero, .kpi, .card, .item, .quick button, .stat");
 
     if (scrollObserver) scrollObserver.disconnect();
-    const sc = $("scrollContainer") || document.querySelector(".center");
 
     let batch = 0;
     let batchTimer = null;
@@ -977,18 +1088,25 @@ function setupScrollMotion() {
         el.classList.add("reveal-item");
         const rect = el.getBoundingClientRect();
         if (rect.top < vh + 40) {
-            // Елементи на першому екрані одразу анімуються каскадом
             el.style.setProperty("--stagger", `${Math.min(idx * 45, 280)}ms`);
             requestAnimationFrame(() => el.classList.add("in-view"));
         } else {
-            // Елементи нижче за екраном анімуються під час скролу вниз
             el.classList.remove("in-view");
             scrollObserver.observe(el);
         }
     });
 }
 
-// Індикатор прогресу скролу через requestAnimationFrame (без навантаження на GPU)
+// Підсвітка карток при наведенні курсору
+document.addEventListener("mousemove", e => {
+    const card = e.target.closest(".card, .kpi, .item");
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty("--mx", `${e.clientX - rect.left}px`);
+    card.style.setProperty("--my", `${e.clientY - rect.top}px`);
+}, { passive: true });
+
+// Індикатор прогресу скролу
 const scEl = $("scrollContainer") || document.querySelector(".center");
 const progEl = $("scrollProgress");
 if (scEl && progEl) {
@@ -1046,11 +1164,12 @@ function renderOutagePanel(h) {
         <div class="ecoflow-box">
             <div>
                 <small class="muted" style="margin:0">Рекомендована зарядна станція / інвертор</small>
-                <div class="ecoflow-model">🔋 ${esc(bk.recommended_model)}</div>
+                <div class="ecoflow-model inline-ic">${lucideTag("battery-charging")} <span>${esc(bk.recommended_model)}</span></div>
             </div>
-            <button class="btn-y sm" onclick="previewOptimization(true)">✨ Перенести прилади з годин відключень</button>
+            <button class="btn-y sm btn-ic" onclick="previewOptimization(true)">${lucideTag("sparkles")}<span>Перенести прилади з годин відключень</span></button>
         </div>
         ${affectedHtml}`;
+    renderIcons($("outageStats"));
 }
 
 async function saveOutageHours(hoursArr) {
@@ -1065,7 +1184,7 @@ async function saveOutageHours(hoursArr) {
         });
         Object.assign(h, updated);
     } catch (e) {
-        toast("⚠️ " + e.message);
+        toast(e.message);
     }
     await refresh();
 }
@@ -1079,7 +1198,7 @@ async function toggleOutageHour(hr) {
 
 async function setOutageQueue(qKey) {
     const hrs = OUTAGE_QUEUES[qKey] || [];
-    addEvent("info", "🕯️ Змінено графік ГПВ", hrs.length ? `Обрано ${hrs.length} год відключень` : "Відключення вимкнено");
+    addEvent("info", "Змінено графік ГПВ", hrs.length ? `Обрано ${hrs.length} год відключень` : "Відключення вимкнено");
     await saveOutageHours(hrs);
     toast(hrs.length ? `Застосовано графік ГПВ (${hrs.length} год)` : "Відключення прибрано");
 }
@@ -1093,11 +1212,11 @@ async function applyPreset(presetKey) {
             body: JSON.stringify({ preset: presetKey }),
         });
         Object.assign(h, updated);
-        addEvent("ok", "🎬 Завантажено сценарій", names[presetKey] || presetKey);
+        addEvent("ok", "Завантажено сценарій", names[presetKey] || presetKey);
         await refresh();
-        toast(`🎬 Застосовано сценарій: ${names[presetKey] || presetKey}`);
+        toast(`Застосовано сценарій: ${names[presetKey] || presetKey}`);
     } catch (e) {
-        toast("⚠️ Не вдалося завантажити сценарій: " + e.message);
+        toast("Не вдалося завантажити сценарій: " + e.message);
     }
 }
 
@@ -1114,7 +1233,7 @@ function renderMeterAndSolar() {
         <div class="rowbar"><span>1-зонний</span><span class="tr"><i style="width:${(tc.monthly_1zone / mx * 100).toFixed(0)}%;background:#EF4444"></i></span><span>${fmt(tc.monthly_1zone, 0)} грн/міс</span></div>
         <div class="rowbar"><span>2-зонний (ніч 50%)</span><span class="tr"><i style="width:${(tc.monthly_2zone / mx * 100).toFixed(0)}%;background:#FACC15"></i></span><span>${fmt(tc.monthly_2zone, 0)} грн/міс</span></div>
         <div class="rowbar"><span>3-зонний</span><span class="tr"><i style="width:${(tc.monthly_3zone / mx * 100).toFixed(0)}%;background:#38BDF8"></i></span><span>${fmt(tc.monthly_3zone, 0)} грн/міс</span></div>
-        <div class="tip" style="margin-top:10px;border-top:1px solid var(--bd);border-bottom:none">📟 ${pb}</div>`;
+        <div class="tip" style="margin-top:10px;border-top:1px solid var(--bd);border-bottom:none">${lucideTag("gauge", "ic-p")}<span>${pb}</span></div>`;
 
     const yrSave = tc.solar_1_5kw_monthly_save_uah * 12;
     $("aSolarCard").innerHTML = `
@@ -1127,7 +1246,7 @@ function renderMeterAndSolar() {
 }
 
 function downloadPdfReport() {
-    if (!sim) { toast("⚠️ Немає даних для звіту"); return; }
+    if (!sim) { toast("Немає даних для звіту"); return; }
     const h = activeHouse();
     const tc = sim.tariff_comparison || {};
     const bk = sim.outage_backup || {};
@@ -1137,7 +1256,7 @@ function downloadPdfReport() {
     ).join("");
 
     $("printReport").innerHTML = `
-        <h1>⚡ Паспорт енергоспоживання будинку — «${esc(h.name)}»</h1>
+        <h1>Паспорт енергоспоживання будинку — «${esc(h.name)}»</h1>
         <div class="pr-meta">Адреса: ${esc(h.address || "—")} • Власник: ${esc(state.profile.name)} • Сформовано: ${nowStr}</div>
         <div class="pr-kpis">
             <div class="pr-kpi"><b>${fmt(sim.total_kwh)} кВт·год</b><span>Споживання за добу</span></div>
@@ -1188,7 +1307,7 @@ $("timeline").addEventListener("click", async e => {
     if (!a) return;
     const set = new Set(a.schedule);
     if (set.has(hr)) {
-        if (set.size <= 1) { toast("⚠️ Залиште хоча б одну годину або вимкніть прилад тумблером"); return; }
+        if (set.size <= 1) { toast("Залиште хоча б одну годину або вимкніть прилад тумблером"); return; }
         set.delete(hr);
     } else {
         set.add(hr);
@@ -1196,6 +1315,7 @@ $("timeline").addEventListener("click", async e => {
     const newSched = [...set].sort((x, y) => x - y);
     a.schedule = newSched;
     renderShellExtras(h);
+    renderIcons($("timeline"));
     try {
         const updated = await apiFetch(`/api/houses/${h.id}/appliances/${a.id}`, {
             method: "PUT",
@@ -1203,11 +1323,12 @@ $("timeline").addEventListener("click", async e => {
         });
         h.appliances[appIdx] = updated;
     } catch (err) {
-        toast("⚠️ " + err.message);
+        toast(err.message);
     }
     await refresh();
 });
 window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
+renderIcons();
 setView(location.hash.slice(1) || "home");
 renderShell();
 initFromDb();
