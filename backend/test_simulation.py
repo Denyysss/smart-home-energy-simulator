@@ -503,7 +503,6 @@ def test_live_voe_fact_auto_cancels_outage_at_14_01_and_remembers_village(monkey
         }
 
     monkeypatch.setattr(gpv_service, "get_live_region_schedule", fake_live_schedule)
-    monkeypatch.setattr(main_mod, "get_live_region_schedule", fake_live_schedule)
     monkeypatch.setattr(gpv_service, "kyiv_now", lambda: state_holder["now"])
 
     with TestClient(app) as client:

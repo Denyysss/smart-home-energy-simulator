@@ -1,0 +1,160 @@
+/* ============================================================
+   css/themes.css — Кольорові теми сторінок, анімації появи (Motion Design) та світла тема
+   ============================================================ */
+:root{
+  --theme-1:#FACC15;
+  --theme-2:#38BDF8;
+  --theme-3:#818CF8;
+  --theme-glow:rgba(250,204,21,.14);
+  --hero-grad:linear-gradient(135deg,rgba(30,45,74,.92),rgba(22,34,56,.88) 55%,rgba(56,189,248,.18));
+}
+body[data-page="home"]{
+  --theme-1:#FACC15;--theme-2:#38BDF8;--theme-3:#F97316;
+  --theme-glow:rgba(250,204,21,.15);
+  --hero-grad:linear-gradient(135deg,rgba(45,38,18,.88),rgba(22,34,56,.9) 55%,rgba(56,189,248,.22));
+}
+body[data-page="houses"]{
+  --theme-1:#06B6D4;--theme-2:#14B8A6;--theme-3:#38BDF8;
+  --theme-glow:rgba(6,182,212,.18);
+  --hero-grad:linear-gradient(135deg,rgba(8,51,68,.92),rgba(19,42,58,.9) 55%,rgba(20,184,166,.25));
+}
+body[data-page="appliances"]{
+  --theme-1:#A855F7;--theme-2:#F97316;--theme-3:#EC4899;
+  --theme-glow:rgba(168,85,247,.18);
+  --hero-grad:linear-gradient(135deg,rgba(59,7,100,.88),rgba(24,24,52,.92) 55%,rgba(249,115,22,.22));
+}
+body[data-page="charts"]{
+  --theme-1:#6366F1;--theme-2:#22D3EE;--theme-3:#FACC15;
+  --theme-glow:rgba(99,102,241,.2);
+  --hero-grad:linear-gradient(135deg,rgba(30,27,75,.92),rgba(15,23,42,.92) 55%,rgba(34,211,238,.24));
+}
+body[data-page="analytics"]{
+  --theme-1:#10B981;--theme-2:#84CC16;--theme-3:#14B8A6;
+  --theme-glow:rgba(16,185,129,.18);
+  --hero-grad:linear-gradient(135deg,rgba(6,78,59,.9),rgba(17,34,51,.92) 55%,rgba(132,204,22,.22));
+}
+body[data-page="settings"]{
+  --theme-1:#F43F5E;--theme-2:#94A3B8;--theme-3:#38BDF8;
+  --theme-glow:rgba(244,63,94,.16);
+  --hero-grad:linear-gradient(135deg,rgba(76,5,25,.85),rgba(22,34,56,.92) 55%,rgba(148,163,184,.2));
+}
+
+.ambient-bg{
+  position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;
+  background:
+    radial-gradient(650px circle at 20% 10%, var(--theme-glow), transparent 70%),
+    radial-gradient(700px circle at 85% 85%, var(--theme-glow), transparent 70%);
+  transition:background .4s ease;
+}
+.orb,.bg-grid{display:none}
+
+.hero,.page-hero{
+  background:var(--hero-grad)!important;
+  border:1px solid var(--bd2)!important;
+  border-radius:18px;padding:24px 26px;
+  display:flex;justify-content:space-between;align-items:center;gap:18px;
+  position:relative;overflow:hidden;
+  box-shadow:0 10px 24px -10px rgba(0,0,0,.35);
+}
+.page-hero h2{font-size:1.35rem;font-weight:800;margin:8px 0 4px;letter-spacing:-0.02em}
+.page-hero p{font-size:.82rem;color:var(--t2);max-width:560px;line-height:1.45}
+.page-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:20px;font-size:.68rem;font-weight:700;letter-spacing:.06em;background:rgba(148,163,184,.12);color:var(--theme-1);border:1px solid var(--bd2)}
+.page-tag .lucide{width:13px;height:13px}
+
+.nav-item.active{background:var(--theme-glow)!important;color:var(--theme-1)!important;border-left:3px solid var(--theme-1)}
+
+.card,.kpi,.item,.quick button,.today-row{
+  transition:transform .22s cubic-bezier(.16,1,.3,1),border-color .22s ease,box-shadow .22s ease,background .25s ease;
+}
+.card:hover,.kpi:hover,.item:hover{
+  border-color:var(--bd2);
+  transform:translateY(-2px);
+  box-shadow:0 12px 28px -12px rgba(0,0,0,.25);
+}
+
+.reveal-item{
+  opacity:0;
+  transform:translate3d(0,16px,0);
+  transition:opacity .36s cubic-bezier(.16,1,.3,1),transform .36s cubic-bezier(.16,1,.3,1);
+  transition-delay:var(--stagger,0ms);
+  will-change:opacity,transform;
+}
+.reveal-item.in-view{
+  opacity:1;
+  transform:translate3d(0,0,0);
+}
+
+.view.active{animation:pageMorph .28s cubic-bezier(.16,1,.3,1) both}
+@keyframes pageMorph{
+  from{opacity:0;transform:translate3d(0,10px,0)}
+  to{opacity:1;transform:translate3d(0,0,0)}
+}
+
+/* ---------- Автоматична адаптація під світлу тему Windows / браузера ---------- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:#F1F5F9;
+    --bg2:#FFFFFF;
+    --card:#FFFFFF;
+    --card2:#F8FAFC;
+    --inp:#F1F5F9;
+    --bd:rgba(15,23,42,.09);
+    --bd2:rgba(15,23,42,.18);
+    --t:#0F172A;
+    --t2:#334155;
+    --t3:#64748B;
+    --y:#D97706;
+    --b:#0284C7;
+    --p:#4F46E5;
+    --g:#16A34A;
+    --r:#DC2626;
+    --o:#EA580C;
+    --topbar-bg:rgba(255,255,255,.88);
+    --auth-bg:rgba(255,255,255,.92);
+  }
+  body[data-page="home"] {
+    --theme-1:#D97706;--theme-2:#0284C7;--theme-3:#EA580C;
+    --theme-glow:rgba(217,119,6,.12);
+    --hero-grad:linear-gradient(135deg,#FFFBEB,#F0F9FF 55%,#E0F2FE);
+  }
+  body[data-page="houses"] {
+    --theme-1:#0891B2;--theme-2:#0D9488;--theme-3:#0284C7;
+    --theme-glow:rgba(8,145,178,.12);
+    --hero-grad:linear-gradient(135deg,#ECFEFF,#F0FDFA 55%,#E0F2FE);
+  }
+  body[data-page="appliances"] {
+    --theme-1:#7C3AED;--theme-2:#EA580C;--theme-3:#DB2777;
+    --theme-glow:rgba(124,58,237,.12);
+    --hero-grad:linear-gradient(135deg,#F5F3FF,#FFF7ED 55%,#FDF2F8);
+  }
+  body[data-page="charts"] {
+    --theme-1:#4F46E5;--theme-2:#0891B2;--theme-3:#D97706;
+    --theme-glow:rgba(79,70,229,.12);
+    --hero-grad:linear-gradient(135deg,#EEF2FF,#ECFEFF 55%,#FFFBEB);
+  }
+  body[data-page="analytics"] {
+    --theme-1:#059669;--theme-2:#65A30D;--theme-3:#0D9488;
+    --theme-glow:rgba(5,150,105,.12);
+    --hero-grad:linear-gradient(135deg,#ECFDF5,#F7FEE7 55%,#F0FDFA);
+  }
+  body[data-page="settings"] {
+    --theme-1:#E11D48;--theme-2:#475569;--theme-3:#0284C7;
+    --theme-glow:rgba(225,29,72,.1);
+    --hero-grad:linear-gradient(135deg,#FFF1F2,#F8FAFC 55%,#F0F9FF);
+  }
+  .opt-card{background:linear-gradient(135deg,#FFFBEB,#F0F9FF);border-color:rgba(217,119,6,.35)}
+  .opt-headline .opt-save{color:#D97706}
+  .eco{background:linear-gradient(135deg,#DCFCE7,#D1FAE5);color:#166534;border-color:rgba(22,163,74,.25)}
+  .eco-ic{background:rgba(22,163,74,.16);color:#15803D}
+  .banner.over{background:linear-gradient(135deg,#FEE2E2,#FECACA);color:#991B1B}
+  .banner.over small{color:#B91C1C}
+  .banner.okb{background:linear-gradient(135deg,#DCFCE7,#BBF7D0);color:#166534}
+  .banner.err{background:#FEE2E2;color:#991B1B}
+  .card,.kpi,.item,.rs,.set,.house-sw{box-shadow:0 2px 10px rgba(15,23,42,.04)}
+  .house-iso-svg{filter:drop-shadow(0 12px 18px rgba(15,23,42,.18))}
+  .status.off-gpv{background:#FEE2E2;color:#B91C1C;border-color:#FCA5A5}
+  .hs-gpv-sub{background:rgba(241,245,249,.9)}
+  .gpv-lbtn.active-no{background:#FEE2E2;color:#991B1B}
+  .gpv-lbtn.active-yes{background:#DCFCE7;color:#166534}
+  .gpv-q-chip.sel{color:#FFFFFF}
+}
