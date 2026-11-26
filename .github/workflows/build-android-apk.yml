@@ -1,0 +1,91 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - feature/energydim-v2
+    paths:
+      - "frontend/**"
+      - "mobile/**"
+      - ".github/workflows/build-android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build EnergyDim.apk
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor & Generate Android Project + Icons
+        working-directory: mobile
+        run: |
+          npm install
+          npx cap add android
+          npx capacitor-assets generate --android --iconBackgroundColor '#0B1120' --iconBackgroundColorDark '#0B1120' --splashBackgroundColor '#0B1120' --splashBackgroundColorDark '#0B1120'
+          npx cap sync android
+
+      - name: Enable Cleartext Local Wi-Fi Fallback in AndroidManifest
+        working-directory: mobile/android/app/src/main
+        run: |
+          python3 -c '
+          from pathlib import Path
+          p = Path("AndroidManifest.xml")
+          txt = p.read_text(encoding="utf-8")
+          if "usesCleartextTraffic" not in txt:
+              txt = txt.replace("<application", "<application android:usesCleartextTraffic=\"true\"", 1)
+              p.write_text(txt, encoding="utf-8")
+          '
+
+      - name: Build Signed Installable APK (Gradle)
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../../EnergyDim.apk
+
+      - name: Upload EnergyDim.apk to Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnergyDim-Android-APK
+          path: EnergyDim.apk
+
+      - name: Publish EnergyDim.apk to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mobile-latest
+          name: "📱 ЕнергіяДім для Android (EnergyDim.apk)"
+          body: |
+            ### Мобільний застосунок **ЕнергіяДім** для Android
+            Автоматично зібраний актуальний `.apk`-файл із гілки `${{ github.ref_name }}` (коміт `${{ github.sha }}`).
+
+            #### Як встановити на смартфон Android:
+            1. Натисніть нижче на файл **`EnergyDim.apk`** у блоці **Assets**, щоб завантажити його на телефон.
+            2. Відкрийте завантажений файл і підтвердьте встановлення (якщо телефон запитає дозвіл на встановлення з браузера або Google Play Захист покаже попередження для студентського додатку — натисніть *«Детальніше → Все одно встановити»*).
+            3. Додаток автоматично підключається до хмарного сервера `https://smart-home-energy-simulator.onrender.com` (спільна база даних, одноразовий гостьовий кабінет та живі графіки АТ «Вінницяобленерго»).
+
+            #### Для власників iPhone (iOS):
+            Відкрийте у Safari `https://smart-home-energy-simulator.onrender.com` → натисніть **Поділитися** → **На початковий екран** (PWA-режим на весь екран).
+          files: EnergyDim.apk
+          prerelease: false
+          make_latest: true

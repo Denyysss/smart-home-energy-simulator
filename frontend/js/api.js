@@ -42,9 +42,21 @@ export const VIEWS = {
 };
 
 export const KEY = "energydim.v3";
+export const CLOUD_API_URL = "https://smart-home-energy-simulator.onrender.com";
+
+export function isNativeMobileWrapper() {
+    if (window.Capacitor !== undefined) return true;
+    if (location.protocol === "capacitor:" || location.protocol === "ionic:") return true;
+    // Capacitor Android WebView роздає статичні файли з https://localhost (без порту)
+    if (location.protocol === "https:" && location.hostname === "localhost" && !location.port) return true;
+    return false;
+}
 
 export function detectDefaultApi() {
     if (window.ENERGYDIM_API_URL !== undefined) return window.ENERGYDIM_API_URL;
+    if (isNativeMobileWrapper()) {
+        return CLOUD_API_URL;
+    }
     const isLocalHost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
     if (location.protocol === "file:") {
         return "http://127.0.0.1:8000";
@@ -75,7 +87,11 @@ export function loadState() {
                 s.houses = defaultState().houses;
                 s.events = [];
             }
-            return { ...defaultState(), ...s, settings: { ...defaultState().settings, ...s.settings } };
+            const mergedSettings = { ...defaultState().settings, ...s.settings };
+            if (isNativeMobileWrapper() && !mergedSettings.api) {
+                mergedSettings.api = CLOUD_API_URL;
+            }
+            return { ...defaultState(), ...s, settings: mergedSettings };
         }
     } catch (e) {}
     return defaultState();
@@ -258,6 +274,9 @@ export async function apiFetch(path, options = {}) {
     try {
         r = await fetch(apiUrl(path), { ...options, headers });
     } catch (netErr) {
+        if (isNativeMobileWrapper()) {
+            throw new Error("Хмарний сервер прокидається після сну (~20 сек) або відсутній інтернет. Зачекайте кілька секунд і натисніть ще раз.");
+        }
         throw new Error("Бекенд не запущено або недоступний (порт 8000). Запустіть сервер у терміналі: python -m uvicorn main:app --reload --port 8000");
     }
     if (!r.ok) {

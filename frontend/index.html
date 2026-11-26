@@ -2,10 +2,16 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B1120">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ЕнергіяДім">
 <title>ЕнергіяДім — Контроль твоїх витрат</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -60,6 +66,9 @@
           <i data-lucide="search"></i>
           <input id="searchInput" placeholder="Пошук будинку...">
         </div>
+        <button class="btn-g sm-btn btn-ic" id="installAppTopBtn" onclick="openMobileAppModal()" title="Встановити додаток на телефон (Android APK або iOS PWA)">
+          <i data-lucide="smartphone"></i><span>Додаток</span>
+        </button>
         <button class="btn-g sm-pdf btn-ic" onclick="downloadPdfReport()" title="Сформувати паспорт енергоспоживання у PDF">
           <i data-lucide="printer"></i><span>PDF-звіт</span>
         </button>
@@ -629,6 +638,9 @@
     <div class="auth-divider"><span>або без реєстрації</span></div>
     <button type="button" class="btn-g btn-ic" id="authDemoBtn" style="width:100%;justify-content:center" onclick="quickDemoLogin()">
       <i data-lucide="user-check"></i><span>Увійти гостьовим акаунтом (пустий кабінет)</span>
+    </button>
+    <button type="button" class="btn-g btn-ic" id="authMobileBtn" style="width:100%;justify-content:center;margin-top:8px;font-size:.78rem;padding:8px 14px" onclick="openMobileAppModal()">
+      <i data-lucide="smartphone"></i><span>Завантажити додаток на телефон (APK / iOS)</span>
     </button>
   </div>
 </div>

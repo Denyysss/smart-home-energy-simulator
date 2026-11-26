@@ -30,6 +30,9 @@ import {
     initFromDb, initGuestUnloadCleanup, logoutUser,
     quickDemoLogin, submitAuth, switchAuthTab,
 } from "./auth.js";
+import {
+    initPwaAndMobileSupport, openMobileAppModal, triggerPwaInstall,
+} from "./pwa.js";
 
 // ---------- Запуск симуляції та оновлення екрана ----------
 async function runSim() {
@@ -348,6 +351,7 @@ initModalListeners();
 initGuestUnloadCleanup();
 initBackupImportListener();
 startGpvAutoSyncTimer();
+initPwaAndMobileSupport();
 
 function openHouseFormById(id) {
     openHouseForm(ctx.state.houses.find(z => z.id === id));
@@ -394,6 +398,8 @@ Object.assign(window, {
     submitAuth,
     quickDemoLogin,
     logoutUser,
+    openMobileAppModal,
+    triggerPwaInstall,
 });
 
 // Слухачі головної панелі та інтерактивної 24-годинної матриці

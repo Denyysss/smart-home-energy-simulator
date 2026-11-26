@@ -11,3 +11,6 @@ __pycache__/
 .env
 .venv/
 venv/
+mobile/node_modules/
+mobile/android/
+*.apk

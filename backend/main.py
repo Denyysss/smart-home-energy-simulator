@@ -20,9 +20,10 @@ import mimetypes
 import os
 from pathlib import Path
 
-# Гарантуємо коректний MIME-тип для ES-модулів на всіх ноутбуках Windows
+# Гарантуємо коректний MIME-тип для ES-модулів та PWA на всіх системах
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,10 @@ DEFAULT_ORIGINS = (
     "http://127.0.0.1:5500,"
     "http://localhost:5501,"
     "http://127.0.0.1:5501,"
+    "https://localhost,"
+    "http://localhost,"
+    "capacitor://localhost,"
+    "ionic://localhost,"
     "null"
 )
 ALLOWED_ORIGINS = [
@@ -82,7 +87,7 @@ if os.getenv("RENDER_EXTERNAL_URL"):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^(capacitor|ionic|https?)://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],

@@ -1,0 +1,14 @@
+{
+  "name": "energydim-mobile",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Capacitor Android wrapper for EnergyDim Smart Home Energy Simulator",
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0"
+  }
+}
